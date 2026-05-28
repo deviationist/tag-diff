@@ -145,13 +145,20 @@ def html_report(pre_root, post_root, rels, out_path):
     """
     import html as _html
     from datetime import datetime
+    KEY_FIELDS = ("title", "artist", "album", "albumArtist", "genre",
+                  "bpm", "key", "label", "date", "cover_art")
     files, field_counts = [], {}
+    unmatched = []
     tc = {"added": 0, "removed": 0, "changed": 0}
     n_total = 0
     for rel in rels:
         n_total += 1
-        changes = diff_tags(read_tags(os.path.join(pre_root, rel)),
-                            read_tags(os.path.join(post_root, rel)))
+        pre_tags = read_tags(os.path.join(pre_root, rel))
+        post_tags = read_tags(os.path.join(post_root, rel))
+        # OneTagger marks every match with 1T_TAGGEDDATE; absence = unmatched.
+        if not ("TXXX:1T_TAGGEDDATE" in post_tags or "1T_TAGGEDDATE" in post_tags):
+            unmatched.append((rel, post_tags))
+        changes = diff_tags(pre_tags, post_tags)
         if not changes:
             continue
         rel_e = _html.escape(rel)
@@ -176,22 +183,70 @@ def html_report(pre_root, post_root, rels, out_path):
                 f'<td class="action"><button class="dismiss-row" title="Mark row reviewed">✓</button></td>'
                 f'</tr>'
             )
-        files.append((rel_e, rows))
+        name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
+        # marker-only files: the only diff is OneTagger's "I touched this" stamp,
+        # i.e. an addition of TXXX:1T_TAGGEDDATE. Useful to hide as review noise.
+        marker_only = (len(changes) == 1 and changes[0][0] == "+"
+                       and changes[0][1] == "TXXX:1T_TAGGEDDATE")
+        files.append((rel_e, name_e, marker_only, rows))
 
     fields_rows = "".join(
         f"<tr><td>{_html.escape(k)}</td><td>{v}</td></tr>"
         for k, v in sorted(field_counts.items(), key=lambda x: -x[1]))
 
     file_sections = "".join(
-        f'<details data-file="{rel}" open><summary>'
+        f'<details data-file="{rel}"{" data-marker-only=\"1\"" if marker_only else ""} open><summary>'
         f'<span class="path">{rel}</span>'
+        f'<button class="copy-name" data-copy="{name}" title="Copy filename (no ext)">⧉</button>'
         f'<span class="spacer"></span>'
         f'<span class="count">{len(rs)} change{"s" if len(rs) != 1 else ""}</span>'
         f'<button class="dismiss-file" title="Mark file reviewed">✓ file</button>'
         f'</summary>'
         f'<table class="diff"><colgroup><col class="col-k"><col><col><col class="col-a"></colgroup>'
         f'<tbody>{"".join(rs)}</tbody></table></details>'
-        for rel, rs in files)
+        for rel, name, marker_only, rs in files)
+    marker_only_count = sum(1 for _, _, mo, _ in files if mo)
+
+    # Unmatched section — files OneTagger couldn't tag (no 1T_TAGGEDDATE marker)
+    # Each row is a "manual review queue" item; the existing dismiss-row JS marks
+    # them as reviewed via localStorage keyed by file::__unmatched__.
+    if unmatched:
+        u_rows = []
+        for rel, post_tags in sorted(unmatched, key=lambda x: x[0]):
+            rel_e = _html.escape(rel)
+            name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
+            title = _html.escape(post_tags.get("title") or "")
+            artist = _html.escape(post_tags.get("artist") or "")
+            album = _html.escape(post_tags.get("album") or "")
+            present = [f for f in KEY_FIELDS if post_tags.get(f)]
+            present_str = _html.escape(", ".join(present) if present else "(no recognised tags)")
+            u_rows.append(
+                f'<tr data-file="{rel_e}" data-tag="__unmatched__">'
+                f'<td class="path">{rel_e}'
+                f'<button class="copy-name" data-copy="{name_e}" title="Copy filename (no ext)">⧉</button>'
+                f'</td>'
+                f'<td>{title}</td>'
+                f'<td>{artist}</td>'
+                f'<td>{album}</td>'
+                f'<td class="present">{present_str}</td>'
+                f'<td class="action"><button class="dismiss-row" title="Mark reviewed">✓</button></td>'
+                f'</tr>'
+            )
+        unmatched_section = (
+            '<details class="unmatched-section" open>'
+            f'<summary><span class="path">Unmatched — needs manual review</span>'
+            f'<span class="spacer"></span>'
+            f'<span class="count">{len(unmatched)} files</span></summary>'
+            '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
+            'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
+            '<table class="unmatched">'
+            '<colgroup><col class="col-path"><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
+            '<thead><tr><th>Path</th><th>Title</th><th>Artist</th><th>Album</th>'
+            '<th>Currently has</th><th></th></tr></thead>'
+            f'<tbody>{"".join(u_rows)}</tbody></table></details>'
+        )
+    else:
+        unmatched_section = ""
 
     css = r"""
 :root{color-scheme:dark}
@@ -243,6 +298,28 @@ td.action button:hover{color:#3fb950;background:rgba(46,160,67,.12)}
 tr.dismissed{display:none}
 body.show-dismissed tr.dismissed{display:table-row;opacity:.4}
 body.show-dismissed tr.dismissed td.action button{color:#3fb950}
+.sub{color:#8b949e}
+button.copy-name{background:transparent;border:1px solid #30363d;color:#8b949e;
+  padding:1px 6px;border-radius:3px;cursor:pointer;font-size:11px;margin-left:6px;font-family:ui-monospace,monospace}
+button.copy-name:hover{color:#79c0ff;border-color:#79c0ff}
+button.copy-name.copied{color:#3fb950;border-color:#3fb950}
+details[data-marker-only="1"]{display:none}
+body.show-marker-only details[data-marker-only="1"]{display:block;opacity:.6}
+body.show-marker-only details[data-marker-only="1"]>summary .path::after{
+  content:" · marker-only";color:#8b949e;font-size:11px;font-weight:normal}
+.unmatched-section{border-color:#d29922}
+.unmatched-section>summary{top:39px;background:#161b22}
+.unmatched-section>summary .path{color:#d29922}
+.unmatched-section .hint{padding:8px 12px;font-size:12px;color:#8b949e;border-bottom:1px solid #21262d}
+table.unmatched{width:100%;table-layout:fixed;border-collapse:collapse}
+table.unmatched col.col-path{width:32%}
+table.unmatched col.col-tags{width:18%}
+table.unmatched col.col-a{width:48px}
+table.unmatched th,table.unmatched td{padding:5px 10px;vertical-align:top;border-top:1px solid #21262d;
+  font-family:ui-monospace,SFMono-Regular,monospace;font-size:13px;word-break:break-word;white-space:pre-wrap}
+table.unmatched th{color:#8b949e;text-align:left;font-weight:600;background:#161b22;position:sticky;top:78px}
+table.unmatched td.path{color:#79c0ff}
+table.unmatched td.present{color:#8b949e;font-size:12px}
 """
 
     js = r"""
@@ -263,10 +340,17 @@ body.show-dismissed tr.dismissed td.action button{color:#3fb950}
     });
   }
   function updateCounter(){
-    const trs=document.querySelectorAll('tr[data-file]');
+    // counter reflects what's actually in the visible review queue: when marker-only
+    // is hidden, those files and their rows don't count toward the "reviewed" totals.
+    const showMO=document.body.classList.contains('show-marker-only');
+    const dets=[...document.querySelectorAll('details[data-file]')]
+                  .filter(d=>showMO || d.dataset.markerOnly!=='1');
+    const diffRows=[];
+    dets.forEach(d=>d.querySelectorAll('tr[data-file]').forEach(tr=>diffRows.push(tr)));
+    const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
+    const trs=diffRows.concat(unmatchedRows);
     const totalRows=trs.length;
     let doneRows=0; trs.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneRows++; });
-    const dets=document.querySelectorAll('details[data-file]');
     const totalFiles=dets.length;
     let doneFiles=0; dets.forEach(d=>{
       const rs=d.querySelectorAll('tr[data-file]');
@@ -288,6 +372,15 @@ body.show-dismissed tr.dismissed td.action button{color:#3fb950}
       const allDone=rows.length && rows.every(r=>dismissed.has(rowKey(r)));
       rows.forEach(r=>{ const k=rowKey(r); if(allDone) dismissed.delete(k); else dismissed.add(k); });
       save(); applyDismissals();
+    } else if(t.classList.contains('copy-name')){
+      e.preventDefault(); e.stopPropagation();
+      const text=t.dataset.copy||'';
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(()=>{
+          t.classList.add('copied'); const orig=t.textContent; t.textContent='✓';
+          setTimeout(()=>{ t.classList.remove('copied'); t.textContent=orig; }, 1200);
+        }).catch(()=>{ t.textContent='!'; setTimeout(()=>{ t.textContent='⧉'; }, 1200); });
+      }
     }
   });
   document.addEventListener('DOMContentLoaded', ()=>{
@@ -297,6 +390,15 @@ body.show-dismissed tr.dismissed td.action button{color:#3fb950}
     sd.addEventListener('change', e=>{
       document.body.classList.toggle('show-dismissed', e.target.checked);
       try{ localStorage.setItem(SHOW_KEY, e.target.checked?'1':'0'); }catch(_){}
+    });
+    const MO_KEY='tagdiff:showMarkerOnly';
+    const smo=document.getElementById('show-marker-only');
+    const moPersist=localStorage.getItem(MO_KEY)==='1';
+    smo.checked=moPersist; document.body.classList.toggle('show-marker-only', moPersist);
+    smo.addEventListener('change', e=>{
+      document.body.classList.toggle('show-marker-only', e.target.checked);
+      try{ localStorage.setItem(MO_KEY, e.target.checked?'1':'0'); }catch(_){}
+      updateCounter();
     });
     document.getElementById('clear-all').addEventListener('click', ()=>{
       if(confirm('Clear all reviewed marks?')){ dismissed.clear(); save(); applyDismissals(); }
@@ -310,8 +412,9 @@ body.show-dismissed tr.dismissed td.action button{color:#3fb950}
 <title>OneTagger tag diff</title><style>{css}</style></head><body>
 <header class="bar">
 <h1>OneTagger tag diff</h1>
-<span class="stats">{n_total} scanned · {len(files)} changed · <span class="add-c">+{tc['added']}</span> <span class="mod-c">~{tc['changed']}</span> <span class="del-c">−{tc['removed']}</span> changes</span>
+<span class="stats">{n_total} scanned · {len(files) - marker_only_count} changed · <span class="sub">({marker_only_count} marker-only)</span> · <span class="del-c">{len(unmatched)} unmatched</span> · <span class="add-c">+{tc['added']}</span> <span class="mod-c">~{tc['changed']}</span> <span class="del-c">−{tc['removed']}</span> changes</span>
 <span class="spacer"></span>
+<label><input type="checkbox" id="show-marker-only"> show marker-only</label>
 <label><input type="checkbox" id="show-dismissed"> show reviewed</label>
 <span id="counter">reviewed: 0/0 files · 0/0 changes</span>
 <button id="clear-all" title="Clear all reviewed marks">clear</button>
@@ -321,6 +424,7 @@ body.show-dismissed tr.dismissed td.action button{color:#3fb950}
 <table class="mini"><tbody><tr><td class="sub" colspan="2">changes by field</td></tr>{fields_rows}</tbody></table>
 <div class="small">PRE <code>{_html.escape(pre_root)}</code> → POST <code>{_html.escape(post_root)}</code> · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 </div>
+{unmatched_section}
 {file_sections}
 </div>
 <script>{js}</script>
