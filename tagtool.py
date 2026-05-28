@@ -320,8 +320,10 @@ header.bar button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padd
 header.bar button:hover{background:#30363d}
 .add-c{color:#3fb950}.del-c{color:#f85149}.mod-c{color:#d29922}
 .wrap{padding:16px}
-.meta{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;
-  background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:12px;color:#8b949e;align-items:flex-start}
+.meta{display:grid;grid-template-columns:1fr auto;column-gap:24px;align-items:start;
+  margin-bottom:16px;padding:8px 12px;
+  background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:12px;color:#8b949e}
+.meta .small{align-self:start;justify-self:end;text-align:right}
 .meta table.mini td{padding:1px 14px 1px 0;font-variant-numeric:tabular-nums}
 .meta .small{font-family:ui-monospace,SFMono-Regular,monospace}
 details{border:1px solid #30363d;border-radius:6px;margin:8px 0;background:#161b22}
@@ -364,7 +366,7 @@ details[data-marker-only="1"]{display:none}
 body.show-marker-only details[data-marker-only="1"]{display:block;opacity:.6}
 body.show-marker-only details[data-marker-only="1"]>summary .path::after{
   content:" · marker-only";color:#8b949e;font-size:11px;font-weight:normal}
-.unmatched-section{border-color:#d29922}
+.unmatched-section{border-color:#d29922;margin:0 0 16px 0}
 .unmatched-section>summary{top:39px;background:#161b22}
 .unmatched-section>summary .path{color:#d29922}
 .unmatched-section .hint{padding:8px 12px;font-size:12px;color:#8b949e;border-bottom:1px solid #21262d}
@@ -378,10 +380,7 @@ table.unmatched th{color:#8b949e;text-align:left;font-weight:600;background:#161
 table.unmatched td.path{color:#79c0ff}
 table.unmatched td.present{color:#8b949e;font-size:12px}
 .meta-fields{border:none;background:transparent;margin:0;padding:0}
-.meta-fields>summary{position:static;padding:2px 0;background:transparent;border-bottom:none;border-radius:0;font-family:inherit;font-size:12px}
-.meta-fields>summary::before{content:"▸";color:#8b949e;margin-right:4px}
-.meta-fields[open]>summary::before{content:"▾"}
-.meta-fields>summary::-webkit-details-marker,.meta-fields>summary::marker{display:none}
+.meta-fields>summary{position:static;padding:0;background:transparent;border-bottom:none;border-radius:0}
 .meta-fields>table{margin-top:6px}
 """
 
@@ -499,7 +498,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <div class="wrap">
 <div class="meta">
 <details class="meta-fields">
-  <summary><span class="sub">changes by field</span></summary>
+  <summary><span class="sub">Changes by field</span></summary>
   <table class="mini"><tbody>{fields_rows}</tbody></table>
 </details>
 <div class="small">PRE <code>{_html.escape(pre_root)}</code> → POST <code>{_html.escape(post_root)}</code> · generated {datetime.now():%Y-%m-%d %H:%M}</div>
