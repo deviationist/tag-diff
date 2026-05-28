@@ -1,0 +1,13 @@
+# Python virtualenv (recreatable via requirements.txt)
+.venv/
+__pycache__/
+*.pyc
+
+# Generated HTML reports
+report*.html
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
