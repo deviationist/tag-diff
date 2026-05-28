@@ -293,7 +293,7 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
             '<details class="unmatched-section" open>'
             f'<summary><span class="path">Unmatched — needs manual review</span>'
             f'<span class="spacer"></span>'
-            f'<span class="count">{len(unmatched_data)} files</span></summary>'
+            f'<span class="count" id="unmatched-counter">0/{len(unmatched_data)} confirmed</span></summary>'
             '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
             'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
             '<table class="unmatched">'
@@ -418,7 +418,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
     let doneUnmatched=0; unmatchedRows.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneUnmatched++; });
     const uc=document.getElementById('unmatched-counter');
-    if(uc) uc.textContent='unmatched: '+doneUnmatched+'/'+unmatchedRows.length+' confirmed';
+    if(uc) uc.textContent=doneUnmatched+'/'+unmatchedRows.length+' confirmed';
     const pm=document.getElementById('page-meter');
     if(pm){
       const sel=showMO?'details[data-file]':'details[data-file]:not([data-marker-only="1"])';
@@ -487,7 +487,6 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <label><input type="checkbox" id="show-marker-only"> show marker-only</label>
 <label><input type="checkbox" id="show-dismissed"> show reviewed</label>
 <span id="counter">reviewed: 0/0 files · 0/0 changes</span>
-<span id="unmatched-counter" class="sub" title="how many of the manual-review unmatched files you've ticked off">unmatched: 0/0 confirmed</span>
 <span id="page-meter" class="sub" title="visible detail sections / document scrollable height — watch this jump when you flip the filters">— · — px</span>
 <button id="clear-all" title="Clear all reviewed marks">clear</button>
 </header>
