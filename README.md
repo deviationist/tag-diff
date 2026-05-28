@@ -7,7 +7,7 @@ A small toolkit for batch-tagging an audio library with
 Built originally for an A/B comparison on a ~3,800-track DJ library: clone the
 dataset (ZFS), tag the clone in batches, compare against the pristine original.
 
-![tag-diff report — GitHub-style review UI for OneTagger metadata changes](assets/screenshot.jpg?v=1)
+![tag-diff report — GitHub-style review UI for OneTagger metadata changes](assets/screenshot.jpg?v=2)
 
 ## Components
 
