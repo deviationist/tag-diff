@@ -377,6 +377,12 @@ table.unmatched th,table.unmatched td{padding:5px 10px;vertical-align:top;border
 table.unmatched th{color:#8b949e;text-align:left;font-weight:600;background:#161b22;position:sticky;top:78px}
 table.unmatched td.path{color:#79c0ff}
 table.unmatched td.present{color:#8b949e;font-size:12px}
+.meta-fields{border:none;background:transparent;margin:0;padding:0}
+.meta-fields>summary{position:static;padding:2px 0;background:transparent;border-bottom:none;border-radius:0;font-family:inherit;font-size:12px}
+.meta-fields>summary::before{content:"▸";color:#8b949e;margin-right:4px}
+.meta-fields[open]>summary::before{content:"▾"}
+.meta-fields>summary::-webkit-details-marker,.meta-fields>summary::marker{display:none}
+.meta-fields>table{margin-top:6px}
 """
 
     js = r"""
@@ -492,7 +498,10 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 </header>
 <div class="wrap">
 <div class="meta">
-<table class="mini"><tbody><tr><td class="sub" colspan="2">changes by field</td></tr>{fields_rows}</tbody></table>
+<details class="meta-fields">
+  <summary><span class="sub">changes by field</span></summary>
+  <table class="mini"><tbody>{fields_rows}</tbody></table>
+</details>
 <div class="small">PRE <code>{_html.escape(pre_root)}</code> → POST <code>{_html.escape(post_root)}</code> · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 </div>
 {unmatched_section}

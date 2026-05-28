@@ -25,16 +25,35 @@ Modes:
 | `dump` | `FILE…` | JSON of normalized tags per file |
 | `diff` | `PRE POST` | Readable text diff of one file pair |
 | `treediff` | `PRE_ROOT POST_ROOT` *(rels on stdin)* | Per-file diffs + summary in the terminal |
-| `report` | `PRE_ROOT POST_ROOT OUT.html` *(rels on stdin)* | Self-contained HTML report (see below) |
+| `extract` | `PRE_ROOT POST_ROOT OUT.json` *(rels on stdin)* | Walk trees, dump diff dict to JSON (slow — runs mutagen) |
+| `render` | `IN.json OUT.html` | Build HTML report from cached JSON (fast — no filesystem walk) |
+| `report` | `PRE_ROOT POST_ROOT OUT.html` *(rels on stdin)* | Convenience: `extract` + `render` in one pass |
 
-### HTML report (`tagtool.py report`)
+### HTML report (`tagtool.py report` / `render`)
 
 GitHub-style review UI in one self-contained file:
 
-- Sticky top toolbar — overall stats (scanned / changed / +A ~M −R), `show reviewed` toggle, live counter, `clear` button.
-- Fixed-position columns (tag · before · after · ✓) so info stays in the same place as you scroll across files.
+- **Sticky top toolbar** — overall stats (`X scanned · Y changed · (M marker-only) · K unmatched · +A ~M −R changes`), `show marker-only` toggle, `show reviewed` toggle, live `reviewed: X/Y files · A/B changes` counter, live `visible · doc-height-px` page-meter, `clear` button.
+- **Fixed-position columns** (tag · before · after · ✓) so info stays in the same place as you scroll across files.
 - **Per-row ✓** and **per-file ✓** mark-as-reviewed buttons; persisted in browser `localStorage` keyed by `file::tag` (survives page reload; regenerated reports keep the marks for the same rows).
-- Filename gets a timestamp inserted automatically: `report.html` → `report-YYYY-MM-DD-HHMM.html`, plus a stable `report.html` copy refreshed to the latest.
+- **Unmatched section** at the top (amber) — manual-review queue listing every file OneTagger couldn't match, with path · title · artist · album-artist · album · what tags it currently has · ✓. Its own collapsible header carries an `X/Y confirmed` progress counter. Open in Meta (Mac) / Rekordbox / any tag editor to fix them manually.
+- **Marker-only filter** — files whose only diff is OneTagger's `TXXX:1T_TAGGEDDATE` stamp (i.e. OneTagger matched but the file was already fully tagged, so nothing was actually written with `overwrite:false`) are hidden by default as review noise; `show marker-only` brings them back greyed-out.
+- **⧉ copy buttons** next to every filename — copies the basename without extension to clipboard. Useful for googling tracks while validating tag changes.
+- **Filename gets a timestamp inserted automatically**: `report.html` → `report-YYYY-MM-DD-HHMM.html`, plus a stable `report.html` copy refreshed to the latest.
+
+### Fast iteration with `extract` + `render`
+
+The slow part of building a report is mutagen reading tags from every file in both trees. The cheap part is composing the HTML. Splitting them lets you cache the slow part:
+
+```bash
+# Slow: walk files, dump the diff dict to JSON
+python tagtool.py extract /path/pre /path/post data.json < file-list.txt
+
+# Fast: build HTML from the cache (~0.1s for 3,800 files)
+python tagtool.py render data.json out.html
+```
+
+Re-run `extract` only when the on-disk tags actually change (another tagging pass, manual edits). Iterate on the HTML/CSS/JS in `tagtool.py` and hammer `render` for instant feedback. The JSON cache is gitignored (it's library-specific).
 
 ### `run-bulk.sh` — batch OneTagger driver
 
