@@ -1,0 +1,43 @@
+# Example OneTagger container stack — adapt paths to your environment.
+#
+# Used in tandem with run-bulk.sh from the repo root: run-bulk.sh exec's into
+# this container by name to invoke onetagger-cli in batches.
+#
+# Place a tuned autotagger profile at ./config/auto-tag.json
+# (start from ./auto-tag.example.json and fill in your Discogs token + any
+# other credentials you need).
+
+services:
+  onetagger:
+    image: onetagger:latest      # build CLI-only from Marekkon5/onetagger
+    container_name: onetagger
+    restart: unless-stopped
+    # Image entrypoint is `onetagger-cli`; we hold the container open with a
+    # bare sleep and use `docker exec` into it from run-bulk.sh.
+    entrypoint: ["sleep", "infinity"]
+    command: []
+
+    volumes:
+      # Mount the music tree you want tagged at /music
+      # (e.g. a ZFS clone, an rsync copy — never the original you care about):
+      - /path/to/music:/music
+      # Tuned autotagger profile (token-bearing, do NOT commit):
+      - ./config/auto-tag.json:/config/auto-tag.json:ro
+      # OneTagger's writable state dir (rootfs is read_only):
+      - ./data/config:/home/onetagger/.config/onetagger
+
+    # uid 1000 should belong to (or share gid with) the group that owns the
+    # music tree so writes land with the right ownership. Add the music
+    # group via group_add as needed (uncomment + replace 2005 with your gid):
+    user: "1000:1000"
+    # group_add:
+    #   - "2005"
+
+    # Tier-0 hardening (matches the upstream OneTagger image's expectations)
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

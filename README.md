@@ -58,6 +58,16 @@ DRY_RUN=1 bash run-bulk.sh           # exercise without tagging
 bash run-bulk.sh                     # the real run
 ```
 
+## `examples/`
+
+- **`docker-compose.yml`** — a generic OneTagger container stack; adapt the
+  music bind to your tree and uncomment `group_add` if your music dir is gated
+  by a group. Pair with a `config/auto-tag.json` next to the compose file.
+- **`auto-tag.example.json`** — the autotagger profile we ended up using for an
+  A/B run (gap-fill-only — `overwrite:false`, Discogs styles → genre, art
+  preserved). **Secrets are blanked**; copy to `config/auto-tag.json` and fill
+  in your own Discogs token + any other credentials before use.
+
 ## Requirements
 
 - Python 3.10+ with `mutagen` (`requirements.txt`).

@@ -1,0 +1,97 @@
+{
+  "albumArtFile": false,
+  "albumTagging": false,
+  "albumTaggingRatio": 0.5,
+  "camelot": false,
+  "capitalizeGenres": true,
+  "custom": {
+    "bandcamp": {
+      "match_artist": true
+    },
+    "beatport": {
+      "art_resolution": 800,
+      "ignore_version": false,
+      "max_pages": 2
+    },
+    "beatsource": {
+      "art_resolution": 800
+    },
+    "bpmsupreme": {
+      "email": "",
+      "library": "Supreme",
+      "password": ""
+    },
+    "deezer": {
+      "art_resolution": 1200,
+      "content_language": "en-US"
+    },
+    "discogs": {
+      "max_albums": 4,
+      "token": "",
+      "track_number_int": false
+    },
+    "itunes": {
+      "art_resolution": 1000
+    }
+  },
+  "enableShazam": false,
+  "enhancedLrc": false,
+  "fetchAllResults": false,
+  "filenameTemplate": "%artists% - %title%",
+  "forceShazam": false,
+  "id3v24": true,
+  "includeSubfolders": true,
+  "matchById": false,
+  "matchDuration": false,
+  "maxDurationDifference": 30,
+  "mergeGenres": false,
+  "moveFailed": false,
+  "moveSuccess": false,
+  "multiplatform": false,
+  "multipleMatches": "Default",
+  "onlyYear": false,
+  "overwrite": false,
+  "overwriteTags": [],
+  "parseFilename": false,
+  "platforms": [
+    "discogs",
+    "junodownload",
+    "bandcamp",
+    "deezer",
+    "itunes"
+  ],
+  "removeAllCovers": false,
+  "separators": {
+    "id3": ", ",
+    "mp4": ", "
+  },
+  "shortTitle": false,
+  "skipTagged": true,
+  "strictness": 0.7,
+  "stylesCustomTag": {
+    "id3": "STYLE",
+    "mp4": "STYLE",
+    "vorbis": "STYLE"
+  },
+  "stylesOptions": "stylesToGenre",
+  "tags": [
+    "genre",
+    "releaseDate",
+    "label",
+    "albumArt",
+    "album",
+    "albumArtist",
+    "title",
+    "artist",
+    "remixer",
+    "trackNumber",
+    "discNumber",
+    "version",
+    "key",
+    "bpm",
+    "metaTags"
+  ],
+  "threads": 16,
+  "trackNumberLeadingZeroes": 0,
+  "writeLrc": false
+}
