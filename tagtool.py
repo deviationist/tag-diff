@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Read/diff audio metadata tags across two parallel library trees.
 
-Used first for the OneTagger A/B test (text diff of a few files), and grows
-into the Phase-3 static HTML report. Tag reading via mutagen (handles AIFF/MP3
-ID3, plus generic Vorbis/MP4).
+Originally a OneTagger A/B-test helper; grew into a self-contained HTML
+report with a GitHub-style review UI. Tag reading via mutagen (handles
+AIFF/MP3 ID3, plus M4A/MP4 atoms and generic Vorbis).
 
 Modes:
-  tagtool.py dump FILE...            -> JSON of normalized tags per file
-  tagtool.py diff PRE POST           -> readable diff of one file pair
-  tagtool.py treediff PRE_ROOT POST_ROOT   -> reads newline rel-paths on stdin,
-                                             prints per-file diffs + a summary
+  tagtool.py dump FILE...                       JSON of normalized tags per file
+  tagtool.py diff PRE POST                      readable diff of one file pair
+  tagtool.py treediff PRE_ROOT POST_ROOT        per-file diffs to stdout
+                                                  (newline rel-paths on stdin)
+  tagtool.py extract PRE_ROOT POST_ROOT OUT.json
+                                                walk trees, dump diffs to JSON
+                                                  (slow — runs mutagen)
+  tagtool.py render IN.json OUT.html            build HTML from cached JSON
+                                                  (fast — no filesystem walk)
+  tagtool.py report PRE_ROOT POST_ROOT OUT.html
+                                                extract + render in one pass
 """
 import sys, json, os
 
@@ -136,19 +143,22 @@ def _fmt(changes):
     return lines
 
 
-def html_report(pre_root, post_root, rels, out_path):
-    """Write a self-contained GitHub-style HTML report of PRE->POST tag changes.
+KEY_FIELDS = ("title", "artist", "album", "albumArtist", "genre",
+              "bpm", "key", "label", "date", "cover_art")
 
-    Features: full-width side-by-side before/after columns with fixed positions,
-    per-row and per-file 'mark reviewed' (persisted in localStorage), sticky
-    top toolbar + sticky per-file headers, 'show reviewed' toggle.
+
+def extract_data(pre_root, post_root, rels):
+    """Walk PRE and POST trees, read tags, compute diffs. Return a JSON-able
+    data dict — consumed by html_report / render_html.
+
+    The mutagen reads are the slow part of the pipeline; cache this to disk
+    (`tagtool.py extract`) and you can iterate on HTML/CSS/JS instantly via
+    `tagtool.py render` without re-reading every file.
     """
-    import html as _html
     from datetime import datetime
-    KEY_FIELDS = ("title", "artist", "album", "albumArtist", "genre",
-                  "bpm", "key", "label", "date", "cover_art")
-    files, field_counts = [], {}
+    files = []
     unmatched = []
+    field_counts = {}
     tc = {"added": 0, "removed": 0, "changed": 0}
     n_total = 0
     for rel in rels:
@@ -157,23 +167,71 @@ def html_report(pre_root, post_root, rels, out_path):
         post_tags = read_tags(os.path.join(post_root, rel))
         # OneTagger marks every match with 1T_TAGGEDDATE; absence = unmatched.
         if not ("TXXX:1T_TAGGEDDATE" in post_tags or "1T_TAGGEDDATE" in post_tags):
-            unmatched.append((rel, post_tags))
+            tags_subset = {k: v for k, v in post_tags.items() if k in KEY_FIELDS}
+            unmatched.append({"rel": rel, "tags": tags_subset})
         changes = diff_tags(pre_tags, post_tags)
         if not changes:
             continue
-        rel_e = _html.escape(rel)
-        rows = []
         for c in changes:
             field_counts[c[1]] = field_counts.get(c[1], 0) + 1
-            tag = _html.escape(c[1])
             if c[0] == "+":
                 tc["added"] += 1
-                before, after, cls = "", _html.escape(str(c[2])), "add"
             elif c[0] == "-":
                 tc["removed"] += 1
-                before, after, cls = _html.escape(str(c[2])), "", "del"
             else:
                 tc["changed"] += 1
+        marker_only = (len(changes) == 1 and changes[0][0] == "+"
+                       and changes[0][1] == "TXXX:1T_TAGGEDDATE")
+        files.append({
+            "rel": rel,
+            "marker_only": marker_only,
+            "changes": [list(c) for c in changes],
+        })
+    return {
+        "version": 1,
+        "generated": datetime.now().isoformat(timespec="seconds"),
+        "pre_root": pre_root,
+        "post_root": post_root,
+        "n_total": n_total,
+        "files": files,
+        "unmatched": unmatched,
+        "field_counts": field_counts,
+        "tc": tc,
+    }
+
+
+def html_report(pre_root, post_root, rels, out_path, data=None):
+    """Write a self-contained GitHub-style HTML report of PRE->POST tag changes.
+
+    If `data` is supplied (an extract_data dict — typically from a cached JSON),
+    skips the slow tree walk and just renders. Otherwise walks the trees via
+    extract_data.
+    """
+    import html as _html
+    from datetime import datetime
+    if data is None:
+        data = extract_data(pre_root, post_root, rels)
+    pre_root = data["pre_root"]
+    post_root = data["post_root"]
+    n_total = data["n_total"]
+    tc = data["tc"]
+    field_counts = data["field_counts"]
+    unmatched_data = data["unmatched"]
+    # Build the HTML rows from raw changes data.
+    files = []
+    for f in data["files"]:
+        rel = f["rel"]
+        rel_e = _html.escape(rel)
+        name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
+        marker_only = f["marker_only"]
+        rows = []
+        for c in f["changes"]:
+            tag = _html.escape(c[1])
+            if c[0] == "+":
+                before, after, cls = "", _html.escape(str(c[2])), "add"
+            elif c[0] == "-":
+                before, after, cls = _html.escape(str(c[2])), "", "del"
+            else:
                 before, after, cls = _html.escape(str(c[2])), _html.escape(str(c[3])), "mod"
             rows.append(
                 f'<tr class="{cls}" data-file="{rel_e}" data-tag="{tag}">'
@@ -183,11 +241,6 @@ def html_report(pre_root, post_root, rels, out_path):
                 f'<td class="action"><button class="dismiss-row" title="Mark row reviewed">✓</button></td>'
                 f'</tr>'
             )
-        name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
-        # marker-only files: the only diff is OneTagger's "I touched this" stamp,
-        # i.e. an addition of TXXX:1T_TAGGEDDATE. Useful to hide as review noise.
-        marker_only = (len(changes) == 1 and changes[0][0] == "+"
-                       and changes[0][1] == "TXXX:1T_TAGGEDDATE")
         files.append((rel_e, name_e, marker_only, rows))
 
     fields_rows = "".join(
@@ -210,9 +263,11 @@ def html_report(pre_root, post_root, rels, out_path):
     # Unmatched section — files OneTagger couldn't tag (no 1T_TAGGEDDATE marker)
     # Each row is a "manual review queue" item; the existing dismiss-row JS marks
     # them as reviewed via localStorage keyed by file::__unmatched__.
-    if unmatched:
+    if unmatched_data:
         u_rows = []
-        for rel, post_tags in sorted(unmatched, key=lambda x: x[0]):
+        for u in sorted(unmatched_data, key=lambda x: x["rel"]):
+            rel = u["rel"]
+            post_tags = u["tags"]
             rel_e = _html.escape(rel)
             name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
             title = _html.escape(post_tags.get("title") or "")
@@ -236,7 +291,7 @@ def html_report(pre_root, post_root, rels, out_path):
             '<details class="unmatched-section" open>'
             f'<summary><span class="path">Unmatched — needs manual review</span>'
             f'<span class="spacer"></span>'
-            f'<span class="count">{len(unmatched)} files</span></summary>'
+            f'<span class="count">{len(unmatched_data)} files</span></summary>'
             '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
             'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
             '<table class="unmatched">'
@@ -358,6 +413,15 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     });
     const c=document.getElementById('counter');
     if(c) c.textContent='reviewed: '+doneFiles+'/'+totalFiles+' files · '+doneRows+'/'+totalRows+' changes';
+    const pm=document.getElementById('page-meter');
+    if(pm){
+      const sel=showMO?'details[data-file]':'details[data-file]:not([data-marker-only="1"])';
+      const visible=document.querySelectorAll(sel).length;
+      requestAnimationFrame(()=>{
+        const h=document.documentElement.scrollHeight;
+        pm.textContent=visible+' visible · '+h.toLocaleString()+' px';
+      });
+    }
   }
   document.addEventListener('click', e=>{
     const t=e.target;
@@ -412,11 +476,12 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <title>OneTagger tag diff</title><style>{css}</style></head><body>
 <header class="bar">
 <h1>OneTagger tag diff</h1>
-<span class="stats">{n_total} scanned · {len(files) - marker_only_count} changed · <span class="sub">({marker_only_count} marker-only)</span> · <span class="del-c">{len(unmatched)} unmatched</span> · <span class="add-c">+{tc['added']}</span> <span class="mod-c">~{tc['changed']}</span> <span class="del-c">−{tc['removed']}</span> changes</span>
+<span class="stats">{n_total} scanned · {len(files) - marker_only_count} changed · <span class="sub">({marker_only_count} marker-only)</span> · <span class="del-c">{len(unmatched_data)} unmatched</span> · <span class="add-c">+{tc['added']}</span> <span class="mod-c">~{tc['changed']}</span> <span class="del-c">−{tc['removed']}</span> changes</span>
 <span class="spacer"></span>
 <label><input type="checkbox" id="show-marker-only"> show marker-only</label>
 <label><input type="checkbox" id="show-dismissed"> show reviewed</label>
 <span id="counter">reviewed: 0/0 files · 0/0 changes</span>
+<span id="page-meter" class="sub" title="visible detail sections / document scrollable height — watch this jump when you flip the filters">— · — px</span>
 <button id="clear-all" title="Clear all reviewed marks">clear</button>
 </header>
 <div class="wrap">
@@ -480,6 +545,32 @@ def main():
             print(f"warning: could not refresh latest {out}: {e}", file=sys.stderr)
         print(f"wrote {out_ts}  (latest -> {out})")
         print(f"  {ch}/{tot} files changed (+{tc['added']} ~{tc['changed']} -{tc['removed']})")
+    elif mode == "extract":
+        # Slow data step: read PRE/POST tags, compute diffs, write JSON for fast re-render.
+        pre_root, post_root, out_json = sys.argv[2], sys.argv[3], sys.argv[4]
+        rels = [l.strip() for l in sys.stdin if l.strip()]
+        data = extract_data(pre_root, post_root, rels)
+        with open(out_json, "w") as f:
+            json.dump(data, f, separators=(",", ":"))
+        print(f"wrote {out_json}  ({data['n_total']} scanned, "
+              f"{len(data['files'])} with diffs, {len(data['unmatched'])} unmatched)")
+    elif mode == "render":
+        # Fast render step: load extract_data JSON, build HTML — no filesystem walk.
+        import shutil
+        from datetime import datetime
+        in_json, out = sys.argv[2], sys.argv[3]
+        with open(in_json) as f:
+            data = json.load(f)
+        ts = datetime.now().strftime("%Y-%m-%d-%H%M")
+        base, ext = os.path.splitext(out)
+        out_ts = f"{base}-{ts}{ext or '.html'}"
+        ch, tot, tc = html_report(None, None, None, out_ts, data=data)
+        try:
+            shutil.copy2(out_ts, out)
+        except Exception as e:
+            print(f"warning: could not refresh latest {out}: {e}", file=sys.stderr)
+        print(f"wrote {out_ts}  (latest -> {out})")
+        print(f"  {ch}/{tot} files changed (+{tc['added']} ~{tc['changed']} -{tc['removed']})  (from cached {in_json})")
     else:
         print(__doc__); sys.exit(2)
 
