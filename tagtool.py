@@ -272,6 +272,7 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
             name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
             title = _html.escape(post_tags.get("title") or "")
             artist = _html.escape(post_tags.get("artist") or "")
+            album_artist = _html.escape(post_tags.get("albumArtist") or "")
             album = _html.escape(post_tags.get("album") or "")
             present = [f for f in KEY_FIELDS if post_tags.get(f)]
             present_str = _html.escape(", ".join(present) if present else "(no recognised tags)")
@@ -282,6 +283,7 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
                 f'</td>'
                 f'<td>{title}</td>'
                 f'<td>{artist}</td>'
+                f'<td>{album_artist}</td>'
                 f'<td>{album}</td>'
                 f'<td class="present">{present_str}</td>'
                 f'<td class="action"><button class="dismiss-row" title="Mark reviewed">✓</button></td>'
@@ -295,8 +297,8 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
             '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
             'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
             '<table class="unmatched">'
-            '<colgroup><col class="col-path"><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
-            '<thead><tr><th>Path</th><th>Title</th><th>Artist</th><th>Album</th>'
+            '<colgroup><col class="col-path"><col><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
+            '<thead><tr><th>Path</th><th>Title</th><th>Artist</th><th>Album artist</th><th>Album</th>'
             '<th>Currently has</th><th></th></tr></thead>'
             f'<tbody>{"".join(u_rows)}</tbody></table></details>'
         )
@@ -400,12 +402,11 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     const showMO=document.body.classList.contains('show-marker-only');
     const dets=[...document.querySelectorAll('details[data-file]')]
                   .filter(d=>showMO || d.dataset.markerOnly!=='1');
+    // Diff-section progress (excludes unmatched section so the two counters don't conflate)
     const diffRows=[];
     dets.forEach(d=>d.querySelectorAll('tr[data-file]').forEach(tr=>diffRows.push(tr)));
-    const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
-    const trs=diffRows.concat(unmatchedRows);
-    const totalRows=trs.length;
-    let doneRows=0; trs.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneRows++; });
+    const totalRows=diffRows.length;
+    let doneRows=0; diffRows.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneRows++; });
     const totalFiles=dets.length;
     let doneFiles=0; dets.forEach(d=>{
       const rs=d.querySelectorAll('tr[data-file]');
@@ -413,6 +414,11 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     });
     const c=document.getElementById('counter');
     if(c) c.textContent='reviewed: '+doneFiles+'/'+totalFiles+' files · '+doneRows+'/'+totalRows+' changes';
+    // Unmatched-section progress — separate so you can see manual-fix backlog independently
+    const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
+    let doneUnmatched=0; unmatchedRows.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneUnmatched++; });
+    const uc=document.getElementById('unmatched-counter');
+    if(uc) uc.textContent='unmatched: '+doneUnmatched+'/'+unmatchedRows.length+' confirmed';
     const pm=document.getElementById('page-meter');
     if(pm){
       const sel=showMO?'details[data-file]':'details[data-file]:not([data-marker-only="1"])';
@@ -481,6 +487,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <label><input type="checkbox" id="show-marker-only"> show marker-only</label>
 <label><input type="checkbox" id="show-dismissed"> show reviewed</label>
 <span id="counter">reviewed: 0/0 files · 0/0 changes</span>
+<span id="unmatched-counter" class="sub" title="how many of the manual-review unmatched files you've ticked off">unmatched: 0/0 confirmed</span>
 <span id="page-meter" class="sub" title="visible detail sections / document scrollable height — watch this jump when you flip the filters">— · — px</span>
 <button id="clear-all" title="Clear all reviewed marks">clear</button>
 </header>
