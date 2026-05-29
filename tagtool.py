@@ -17,8 +17,56 @@ Modes:
                                                   (fast — no filesystem walk)
   tagtool.py report PRE_ROOT POST_ROOT OUT.html
                                                 extract + render in one pass
+
+Ignore flags (treediff / extract / report):
+  --ignore GLOB          skip rels with any path component matching GLOB
+                         (repeatable; appends to defaults)
+  --no-default-ignore    drop the built-in defaults (use only --ignore values)
+
+Default ignore patterns: `.*` — any dot-prefixed path component (covers
+`.sync`, `.DS_Store`, `._<name>` AppleDouble files, `.Trash`, etc.).
 """
-import sys, json, os
+import sys, json, os, fnmatch
+
+# Path components matching any of these globs cause the rel to be skipped.
+# `.*` is the catch-all for the Unix "hidden" convention — covers `.sync`
+# (Resilio archive), `.DS_Store`, `.AppleDouble`, `._foo` (AppleDouble
+# resource-fork stubs), `.Trash`, etc.
+DEFAULT_IGNORES = [".*"]
+
+
+def should_ignore(rel, patterns):
+    """True if any path component of `rel` matches any glob in `patterns`."""
+    for part in rel.split(os.sep):
+        for pat in patterns:
+            if fnmatch.fnmatchcase(part, pat):
+                return True
+    return False
+
+
+def parse_ignore_flags(argv):
+    """Pop --ignore PATTERN and --no-default-ignore out of argv.
+
+    Returns (cleaned_argv, ignore_patterns). Defaults are always included
+    unless --no-default-ignore is present; --ignore values append.
+    """
+    extras = []
+    keep_defaults = True
+    cleaned = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--ignore" and i + 1 < len(argv):
+            extras.append(argv[i + 1])
+            i += 2
+        elif a == "--no-default-ignore":
+            keep_defaults = False
+            i += 1
+        else:
+            cleaned.append(a)
+            i += 1
+    ignores = (list(DEFAULT_IGNORES) if keep_defaults else []) + extras
+    return cleaned, ignores
 
 # Friendly names for the ID3 frames OneTagger writes (per auto-tag.json `tags`).
 ID3_MAP = {
@@ -147,27 +195,30 @@ KEY_FIELDS = ("title", "artist", "album", "albumArtist", "genre",
               "bpm", "key", "label", "date", "cover_art")
 
 
-def extract_data(pre_root, post_root, rels):
+def extract_data(pre_root, post_root, rels, ignores=None):
     """Walk PRE and POST trees, read tags, compute diffs. Return a JSON-able
     data dict — consumed by html_report / render_html.
+
+    `ignores` is a list of fnmatch-style globs matched against each rel's
+    path components — rels with any matching component are dropped before
+    any tag I/O happens. None means use DEFAULT_IGNORES; pass [] to disable
+    filtering entirely.
 
     The mutagen reads are the slow part of the pipeline; cache this to disk
     (`tagtool.py extract`) and you can iterate on HTML/CSS/JS instantly via
     `tagtool.py render` without re-reading every file.
     """
     from datetime import datetime
+    ignores = DEFAULT_IGNORES if ignores is None else ignores
     files = []
     unmatched = []
     field_counts = {}
     tc = {"added": 0, "removed": 0, "changed": 0}
     n_total = 0
+    n_ignored = 0
     for rel in rels:
-        # Skip macOS AppleDouble "dot-underscore" companions (`._<name>`) —
-        # they're 4 KB resource-fork metadata stubs, contain no audio,
-        # always show up as "unmatched", and multiply whenever a Mac touches
-        # the share. Filter them at the data-extraction step so they never
-        # enter the JSON cache or any downstream report.
-        if os.path.basename(rel).startswith("._"):
+        if should_ignore(rel, ignores):
+            n_ignored += 1
             continue
         n_total += 1
         pre_tags = read_tags(os.path.join(pre_root, rel))
@@ -200,6 +251,8 @@ def extract_data(pre_root, post_root, rels):
         "pre_root": pre_root,
         "post_root": post_root,
         "n_total": n_total,
+        "n_ignored": n_ignored,
+        "ignores": list(ignores),
         "files": files,
         "unmatched": unmatched,
         "field_counts": field_counts,
@@ -207,17 +260,17 @@ def extract_data(pre_root, post_root, rels):
     }
 
 
-def html_report(pre_root, post_root, rels, out_path, data=None):
+def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
     """Write a self-contained GitHub-style HTML report of PRE->POST tag changes.
 
     If `data` is supplied (an extract_data dict — typically from a cached JSON),
     skips the slow tree walk and just renders. Otherwise walks the trees via
-    extract_data.
+    extract_data. `ignores` is only consulted when `data is None`.
     """
     import html as _html
     from datetime import datetime
     if data is None:
-        data = extract_data(pre_root, post_root, rels)
+        data = extract_data(pre_root, post_root, rels, ignores=ignores)
     pre_root = data["pre_root"]
     post_root = data["post_root"]
     n_total = data["n_total"]
@@ -589,21 +642,26 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 
 
 def main():
-    if len(sys.argv) < 2:
+    argv, ignores = parse_ignore_flags(sys.argv[1:])
+    if not argv:
         print(__doc__); sys.exit(2)
-    mode = sys.argv[1]
+    mode = argv[0]
     if mode == "dump":
-        print(json.dumps({p: read_tags(p) for p in sys.argv[2:]}, indent=2, ensure_ascii=False))
+        print(json.dumps({p: read_tags(p) for p in argv[1:]}, indent=2, ensure_ascii=False))
     elif mode == "diff":
-        pre, post = read_tags(sys.argv[2]), read_tags(sys.argv[3])
+        pre, post = read_tags(argv[1]), read_tags(argv[2])
         for line in _fmt(diff_tags(pre, post)) or ["    (no tag changes)"]:
             print(line)
     elif mode == "treediff":
-        pre_root, post_root = sys.argv[2], sys.argv[3]
+        pre_root, post_root = argv[1], argv[2]
         rels = [l.strip() for l in sys.stdin if l.strip()]
         n_changed = 0
+        n_ignored = 0
         field_counts = {}
         for rel in rels:
+            if should_ignore(rel, ignores):
+                n_ignored += 1
+                continue
             pre = read_tags(os.path.join(pre_root, rel))
             post = read_tags(os.path.join(post_root, rel))
             changes = diff_tags(pre, post)
@@ -615,18 +673,19 @@ def main():
                 print(line)
             for c in changes:
                 field_counts[c[1]] = field_counts.get(c[1], 0) + 1
-        print(f"\n--- summary: {n_changed}/{len(rels)} files changed ---")
+        print(f"\n--- summary: {n_changed}/{len(rels) - n_ignored} files changed "
+              f"({n_ignored} ignored by patterns: {ignores}) ---")
         for k, v in sorted(field_counts.items(), key=lambda x: -x[1]):
             print(f"    {v:4d}  {k}")
     elif mode == "report":
         import shutil
         from datetime import datetime
-        pre_root, post_root, out = sys.argv[2], sys.argv[3], sys.argv[4]
+        pre_root, post_root, out = argv[1], argv[2], argv[3]
         rels = [l.strip() for l in sys.stdin if l.strip()]
         ts = datetime.now().strftime("%Y-%m-%d-%H%M")
         base, ext = os.path.splitext(out)
         out_ts = f"{base}-{ts}{ext or '.html'}"
-        ch, tot, tc = html_report(pre_root, post_root, rels, out_ts)
+        ch, tot, tc = html_report(pre_root, post_root, rels, out_ts, ignores=ignores)
         # also refresh the unversioned 'latest' copy at the requested path
         try:
             shutil.copy2(out_ts, out)
@@ -636,18 +695,19 @@ def main():
         print(f"  {ch}/{tot} files changed (+{tc['added']} ~{tc['changed']} -{tc['removed']})")
     elif mode == "extract":
         # Slow data step: read PRE/POST tags, compute diffs, write JSON for fast re-render.
-        pre_root, post_root, out_json = sys.argv[2], sys.argv[3], sys.argv[4]
+        pre_root, post_root, out_json = argv[1], argv[2], argv[3]
         rels = [l.strip() for l in sys.stdin if l.strip()]
-        data = extract_data(pre_root, post_root, rels)
+        data = extract_data(pre_root, post_root, rels, ignores=ignores)
         with open(out_json, "w") as f:
             json.dump(data, f, separators=(",", ":"))
         print(f"wrote {out_json}  ({data['n_total']} scanned, "
-              f"{len(data['files'])} with diffs, {len(data['unmatched'])} unmatched)")
+              f"{len(data['files'])} with diffs, {len(data['unmatched'])} unmatched, "
+              f"{data['n_ignored']} ignored by {data['ignores']})")
     elif mode == "render":
         # Fast render step: load extract_data JSON, build HTML — no filesystem walk.
         import shutil
         from datetime import datetime
-        in_json, out = sys.argv[2], sys.argv[3]
+        in_json, out = argv[1], argv[2]
         with open(in_json) as f:
             data = json.load(f)
         ts = datetime.now().strftime("%Y-%m-%d-%H%M")

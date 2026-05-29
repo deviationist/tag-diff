@@ -29,6 +29,19 @@ Modes:
 | `render` | `IN.json OUT.html` | Build HTML report from cached JSON (fast — no filesystem walk) |
 | `report` | `PRE_ROOT POST_ROOT OUT.html` *(rels on stdin)* | Convenience: `extract` + `render` in one pass |
 
+**Ignore patterns** (`treediff` / `extract` / `report`): rels with any path
+component matching a glob are skipped before any tag I/O.
+
+| Flag | Meaning |
+|---|---|
+| `--ignore GLOB` | Skip rels with any path component matching `GLOB` (repeatable; appends to defaults). |
+| `--no-default-ignore` | Drop the built-in defaults — only patterns from `--ignore` apply. |
+
+Default: `.*` — any dot-prefixed component, covering `.sync` (Resilio's
+archive folder), `.DS_Store`, `._<name>` (macOS AppleDouble resource-fork
+stubs), `.Trash`, etc. Use e.g. `--ignore '*.bak' --ignore '@eaDir'` to add
+your own.
+
 ### HTML report (`tagtool.py report` / `render`)
 
 GitHub-style review UI in one self-contained file:
