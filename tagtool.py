@@ -324,32 +324,67 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
     # Each row is a "manual review queue" item; the existing dismiss-row JS marks
     # them as reviewed via localStorage keyed by file::__unmatched__.
     if unmatched_data:
+        # Field key -> human label. Order is also column order in the table.
+        UFIELDS = [
+            ("title", "Title"),
+            ("artist", "Artist"),
+            ("albumArtist", "Album artist"),
+            ("album", "Album"),
+        ]
         u_rows = []
         for u in sorted(unmatched_data, key=lambda x: x["rel"]):
             rel = u["rel"]
             post_tags = u["tags"]
             rel_e = _html.escape(rel)
             name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
-            title = _html.escape(post_tags.get("title") or "")
-            artist = _html.escape(post_tags.get("artist") or "")
-            album_artist = _html.escape(post_tags.get("albumArtist") or "")
-            album = _html.escape(post_tags.get("album") or "")
+            vals = {k: (post_tags.get(k) or "") for k, _ in UFIELDS}
+            esc = {k: _html.escape(v) for k, v in vals.items()}
+            # Per-row classes mark which fields are EMPTY. The filter checkboxes
+            # then use CSS `tr:not(.missing-X)` to hide non-matching rows —
+            # multiple filters AND naturally because each rule hides indepdendently.
+            missing_classes = " ".join(f"missing-{k}" for k, v in vals.items() if not v)
             present = [f for f in KEY_FIELDS if post_tags.get(f)]
             present_str = _html.escape(", ".join(present) if present else "(no recognised tags)")
             u_rows.append(
-                f'<tr data-file="{rel_e}" data-tag="__unmatched__">'
-                f'<td class="rownum"></td>'
-                f'<td class="path">{rel_e}'
+                f'<tr class="{missing_classes}" data-file="{rel_e}" data-tag="__unmatched__">'
+                f'<td class="rownum" data-col="num"></td>'
+                f'<td class="path" data-col="path">{rel_e}'
                 f'<button class="copy-name" data-copy="{name_e}" title="Copy filename (no ext)">⧉</button>'
                 f'</td>'
-                f'<td>{title}</td>'
-                f'<td>{artist}</td>'
-                f'<td>{album_artist}</td>'
-                f'<td>{album}</td>'
-                f'<td class="present">{present_str}</td>'
-                f'<td class="action"><button class="dismiss-row" title="Mark reviewed">✓</button></td>'
+                f'<td data-col="title">{esc["title"]}</td>'
+                f'<td data-col="artist">{esc["artist"]}</td>'
+                f'<td data-col="albumArtist">{esc["albumArtist"]}</td>'
+                f'<td data-col="album">{esc["album"]}</td>'
+                f'<td class="present" data-col="present">{present_str}</td>'
+                f'<td class="action" data-col="action"><button class="dismiss-row" title="Mark reviewed">✓</button></td>'
                 f'</tr>'
             )
+
+        def _ctrl_boxes(name, fields, default_checked):
+            return "".join(
+                f'<label><input type="checkbox" data-{name}="{k}"'
+                f'{" checked" if default_checked else ""}> {_html.escape(lbl)}</label>'
+                for k, lbl in fields
+            )
+        filter_boxes = _ctrl_boxes("filter", UFIELDS, default_checked=False)
+        # Column-visibility extends the same 4 fields + "Currently has".
+        col_boxes = _ctrl_boxes("col-toggle",
+                                UFIELDS + [("present", "Currently has")],
+                                default_checked=True)
+        controls_html = (
+            '<div class="unmatched-controls">'
+            '<div class="ctrl-row">'
+            '<span class="ctrl-label">Show only rows missing:</span>'
+            f'{filter_boxes}'
+            '<button class="ctrl-clear" id="clear-filters" title="Clear missing-field filters">clear</button>'
+            '</div>'
+            '<div class="ctrl-row">'
+            '<span class="ctrl-label">Visible columns:</span>'
+            f'{col_boxes}'
+            '</div>'
+            '</div>'
+        )
+
         unmatched_section = (
             '<details class="unmatched-section" open>'
             f'<summary><span class="path">Unmatched — needs manual review</span>'
@@ -357,16 +392,17 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
             f'<span class="count" id="unmatched-counter">0/{len(unmatched_data)} confirmed</span></summary>'
             '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
             'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
+            f'{controls_html}'
             '<table class="unmatched">'
             '<colgroup><col class="col-num"><col class="col-path"><col><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
             '<thead><tr>'
-            '<th class="col-num">#</th>'
-            '<th data-sort="path">Path</th>'
-            '<th data-sort="title">Title</th>'
-            '<th data-sort="artist">Artist</th>'
-            '<th data-sort="albumArtist">Album artist</th>'
-            '<th data-sort="album">Album</th>'
-            '<th>Currently has</th><th></th></tr></thead>'
+            '<th class="col-num" data-col="num">#</th>'
+            '<th data-sort="path" data-col="path">Path</th>'
+            '<th data-sort="title" data-col="title">Title</th>'
+            '<th data-sort="artist" data-col="artist">Artist</th>'
+            '<th data-sort="albumArtist" data-col="albumArtist">Album artist</th>'
+            '<th data-sort="album" data-col="album">Album</th>'
+            '<th data-col="present">Currently has</th><th data-col="action"></th></tr></thead>'
             f'<tbody>{"".join(u_rows)}</tbody></table></details>'
         )
     else:
@@ -437,6 +473,27 @@ body.show-marker-only details[data-marker-only="1"]>summary .path::after{
 .unmatched-section>summary{top:39px;background:#161b22}
 .unmatched-section>summary .path{color:#d29922}
 .unmatched-section .hint{padding:8px 12px;font-size:12px;color:#8b949e;border-bottom:1px solid #21262d}
+.unmatched-controls{padding:8px 12px;border-bottom:1px solid #21262d;background:#0d1117;
+  display:flex;flex-direction:column;gap:6px}
+.unmatched-controls .ctrl-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px;font-size:12px}
+.unmatched-controls .ctrl-label{color:#8b949e;font-weight:600;min-width:170px}
+.unmatched-controls label{color:#c9d1d9;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:5px}
+.unmatched-controls input[type=checkbox]{accent-color:#d29922}
+.unmatched-controls .ctrl-clear{margin-left:auto;background:#21262d;border:1px solid #30363d;
+  color:#c9d1d9;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px}
+.unmatched-controls .ctrl-clear:hover{background:#30363d}
+/* Missing-field filters: each filter-missing-X hides rows that aren't missing X.
+   Multiple filters compose with AND semantics via independent :not() rules. */
+table.unmatched.filter-missing-title    tbody tr:not(.missing-title)      {display:none}
+table.unmatched.filter-missing-artist   tbody tr:not(.missing-artist)     {display:none}
+table.unmatched.filter-missing-albumArtist tbody tr:not(.missing-albumArtist){display:none}
+table.unmatched.filter-missing-album    tbody tr:not(.missing-album)      {display:none}
+/* Column visibility — hides <th> + <td> for that column. */
+table.unmatched.col-hidden-title       [data-col="title"]       {display:none}
+table.unmatched.col-hidden-artist      [data-col="artist"]      {display:none}
+table.unmatched.col-hidden-albumArtist [data-col="albumArtist"] {display:none}
+table.unmatched.col-hidden-album       [data-col="album"]       {display:none}
+table.unmatched.col-hidden-present     [data-col="present"]     {display:none}
 table.unmatched{width:100%;table-layout:fixed;border-collapse:collapse}
 table.unmatched col.col-num{width:48px}
 table.unmatched col.col-path{width:32%}
@@ -500,7 +557,14 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
     let doneUnmatched=0; unmatchedRows.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneUnmatched++; });
     const uc=document.getElementById('unmatched-counter');
-    if(uc) uc.textContent=doneUnmatched+'/'+unmatchedRows.length+' confirmed';
+    if(uc){
+      // When a missing-field filter is on, the "visible" count diverges from total.
+      // Use offsetParent==null as a fast display:none test.
+      const visible=unmatchedRows.filter(tr=>tr.offsetParent!==null).length;
+      const filterOn=visible!==unmatchedRows.length;
+      uc.textContent=doneUnmatched+'/'+unmatchedRows.length+' confirmed'
+        +(filterOn ? ' · '+visible+' visible' : '');
+    }
     const pm=document.getElementById('page-meter');
     if(pm){
       const sel=showMO?'details[data-file]':'details[data-file]:not([data-marker-only="1"])';
@@ -602,6 +666,53 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     document.getElementById('clear-all').addEventListener('click', ()=>{
       if(confirm('Clear all reviewed marks?')){ dismissed.clear(); save(); applyDismissals(); }
     });
+    // Unmatched-table controls: missing-field filters + column-visibility toggles.
+    // State lives in localStorage so the view survives page reload. Both control
+    // sets work by toggling a class on `table.unmatched`; the CSS does the rest.
+    const FILTER_KEY='tagdiff:unmatchedFilters';
+    const COL_KEY='tagdiff:unmatchedHiddenCols';
+    const uTable=document.querySelector('table.unmatched');
+    if(uTable){
+      let filters, hidden;
+      try{ filters=new Set(JSON.parse(localStorage.getItem(FILTER_KEY)||'[]')); }catch(_){ filters=new Set(); }
+      try{ hidden=new Set(JSON.parse(localStorage.getItem(COL_KEY)||'[]')); }catch(_){ hidden=new Set(); }
+      function applyState(){
+        // Strip any old filter-/col-hidden- classes, then re-add the active ones.
+        [...uTable.classList].forEach(c=>{
+          if(c.startsWith('filter-missing-')||c.startsWith('col-hidden-')) uTable.classList.remove(c);
+        });
+        filters.forEach(k=>uTable.classList.add('filter-missing-'+k));
+        hidden.forEach(k=>uTable.classList.add('col-hidden-'+k));
+        updateCounter();
+      }
+      document.querySelectorAll('input[data-filter]').forEach(cb=>{
+        cb.checked=filters.has(cb.dataset.filter);
+        cb.addEventListener('change', e=>{
+          const k=e.target.dataset.filter;
+          if(e.target.checked) filters.add(k); else filters.delete(k);
+          try{ localStorage.setItem(FILTER_KEY, JSON.stringify([...filters])); }catch(_){}
+          applyState();
+        });
+      });
+      document.querySelectorAll('input[data-col-toggle]').forEach(cb=>{
+        // checkbox checked = column visible; checkbox unchecked = column hidden.
+        cb.checked=!hidden.has(cb.dataset.colToggle);
+        cb.addEventListener('change', e=>{
+          const k=e.target.dataset.colToggle;
+          if(e.target.checked) hidden.delete(k); else hidden.add(k);
+          try{ localStorage.setItem(COL_KEY, JSON.stringify([...hidden])); }catch(_){}
+          applyState();
+        });
+      });
+      const cf=document.getElementById('clear-filters');
+      if(cf) cf.addEventListener('click', ()=>{
+        filters.clear();
+        try{ localStorage.setItem(FILTER_KEY, '[]'); }catch(_){}
+        document.querySelectorAll('input[data-filter]').forEach(cb=>cb.checked=false);
+        applyState();
+      });
+      applyState();
+    }
     applyDismissals(); updateCounter();
     try{
       const saved=JSON.parse(localStorage.getItem('tagdiff:unmatchedSort')||'null');
