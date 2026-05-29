@@ -162,6 +162,13 @@ def extract_data(pre_root, post_root, rels):
     tc = {"added": 0, "removed": 0, "changed": 0}
     n_total = 0
     for rel in rels:
+        # Skip macOS AppleDouble "dot-underscore" companions (`._<name>`) —
+        # they're 4 KB resource-fork metadata stubs, contain no audio,
+        # always show up as "unmatched", and multiply whenever a Mac touches
+        # the share. Filter them at the data-extraction step so they never
+        # enter the JSON cache or any downstream report.
+        if os.path.basename(rel).startswith("._"):
+            continue
         n_total += 1
         pre_tags = read_tags(os.path.join(pre_root, rel))
         post_tags = read_tags(os.path.join(post_root, rel))
