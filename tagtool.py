@@ -389,7 +389,7 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
         controls_html = (
             '<div class="unmatched-controls">'
             '<div class="ctrl-row">'
-            '<span class="ctrl-label">Show only rows missing:</span>'
+            '<span class="ctrl-label">Show rows missing:</span>'
             f'{filter_boxes}'
             '<button class="ctrl-clear" id="clear-filters" title="Clear missing-field filters">clear</button>'
             '</div>'
@@ -691,10 +691,13 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       try{ hidden=new Set(JSON.parse(localStorage.getItem(COL_KEY)||'[]')); }catch(_){ hidden=new Set(); }
       const allRows=[...uTable.querySelectorAll('tbody tr[data-file]')];
       function applyFilters(){
-        // AND semantics: a row passes only if it has every selected `missing-*` class.
+        // OR semantics: a row passes if it's missing ANY of the selected fields.
+        // No filters selected → show everything (otherwise an empty .some() would
+        // return false and hide every row).
         const active=[...filters];
         allRows.forEach(tr=>{
-          const ok=active.every(k=>tr.classList.contains('missing-'+k));
+          const ok=active.length===0
+            || active.some(k=>tr.classList.contains('missing-'+k));
           tr.classList.toggle('filter-hidden', !ok);
         });
       }
