@@ -278,6 +278,7 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
             present_str = _html.escape(", ".join(present) if present else "(no recognised tags)")
             u_rows.append(
                 f'<tr data-file="{rel_e}" data-tag="__unmatched__">'
+                f'<td class="rownum"></td>'
                 f'<td class="path">{rel_e}'
                 f'<button class="copy-name" data-copy="{name_e}" title="Copy filename (no ext)">⧉</button>'
                 f'</td>'
@@ -297,8 +298,14 @@ def html_report(pre_root, post_root, rels, out_path, data=None):
             '<div class="hint">These files weren\'t matched by any OneTagger platform run. Open them in '
             'Meta (Mac), Rekordbox, or any tag editor to add tags manually — tick ✓ as you finish each one.</div>'
             '<table class="unmatched">'
-            '<colgroup><col class="col-path"><col><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
-            '<thead><tr><th>Path</th><th>Title</th><th>Artist</th><th>Album artist</th><th>Album</th>'
+            '<colgroup><col class="col-num"><col class="col-path"><col><col><col><col><col class="col-tags"><col class="col-a"></colgroup>'
+            '<thead><tr>'
+            '<th class="col-num">#</th>'
+            '<th data-sort="path">Path</th>'
+            '<th data-sort="title">Title</th>'
+            '<th data-sort="artist">Artist</th>'
+            '<th data-sort="albumArtist">Album artist</th>'
+            '<th data-sort="album">Album</th>'
             '<th>Currently has</th><th></th></tr></thead>'
             f'<tbody>{"".join(u_rows)}</tbody></table></details>'
         )
@@ -371,12 +378,22 @@ body.show-marker-only details[data-marker-only="1"]>summary .path::after{
 .unmatched-section>summary .path{color:#d29922}
 .unmatched-section .hint{padding:8px 12px;font-size:12px;color:#8b949e;border-bottom:1px solid #21262d}
 table.unmatched{width:100%;table-layout:fixed;border-collapse:collapse}
+table.unmatched col.col-num{width:48px}
 table.unmatched col.col-path{width:32%}
 table.unmatched col.col-tags{width:18%}
 table.unmatched col.col-a{width:48px}
+table.unmatched tbody{counter-reset:rownum}
+table.unmatched tbody tr{counter-increment:rownum}
+table.unmatched td.rownum{text-align:right;color:#8b949e;font-variant-numeric:tabular-nums;font-size:11px}
+table.unmatched td.rownum::before{content:counter(rownum)}
+table.unmatched th.col-num{text-align:right;font-size:11px}
 table.unmatched th,table.unmatched td{padding:5px 10px;vertical-align:top;border-top:1px solid #21262d;
   font-family:ui-monospace,SFMono-Regular,monospace;font-size:13px;word-break:break-word;white-space:pre-wrap}
 table.unmatched th{color:#8b949e;text-align:left;font-weight:600;background:#161b22;position:sticky;top:78px}
+table.unmatched th[data-sort]{cursor:pointer;user-select:none}
+table.unmatched th[data-sort]:hover{color:#79c0ff}
+table.unmatched th[data-sort].sort-active{color:#79c0ff}
+table.unmatched th .sort-arrow{margin-left:4px;font-size:10px}
 table.unmatched td.path{color:#79c0ff}
 table.unmatched td.present{color:#8b949e;font-size:12px}
 .meta-fields{border:none;background:transparent;margin:0;padding:0}
@@ -434,8 +451,55 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       });
     }
   }
+  function sortUnmatched(col, dir){
+    const table=document.querySelector('table.unmatched');
+    if(!table) return;
+    const tbody=table.querySelector('tbody');
+    const rows=[...tbody.querySelectorAll('tr[data-file]')];
+    const idxByCol={title:2, artist:3, albumArtist:4, album:5};
+    rows.sort((a,b)=>{
+      let av, bv;
+      if(col==='path'){
+        av=(a.dataset.file||'').toLowerCase();
+        bv=(b.dataset.file||'').toLowerCase();
+      } else {
+        const idx=idxByCol[col];
+        av=(a.children[idx]?.textContent||'').trim().toLowerCase();
+        bv=(b.children[idx]?.textContent||'').trim().toLowerCase();
+      }
+      // Treat empties as 'greater than' any value: asc -> A-Z-empty, desc -> empty-Z-A
+      const aE=av==='', bE=bv==='';
+      if(aE && !bE) return dir==='desc' ? -1 : 1;
+      if(bE && !aE) return dir==='desc' ? 1 : -1;
+      return dir==='desc' ? bv.localeCompare(av) : av.localeCompare(bv);
+    });
+    rows.forEach(r=>tbody.appendChild(r));
+    table.querySelectorAll('th[data-sort]').forEach(th=>{
+      th.classList.remove('sort-active');
+      const arrow=th.querySelector('.sort-arrow');
+      if(arrow) arrow.remove();
+      th.dataset.sortDirection='';
+    });
+    const activeTh=table.querySelector('th[data-sort="'+col+'"]');
+    if(activeTh){
+      activeTh.classList.add('sort-active');
+      activeTh.dataset.sortDirection=dir;
+      const arrow=document.createElement('span');
+      arrow.className='sort-arrow';
+      arrow.textContent=dir==='desc' ? '▼' : '▲';
+      activeTh.appendChild(arrow);
+    }
+    try{ localStorage.setItem('tagdiff:unmatchedSort', JSON.stringify({col,dir})); }catch(_){}
+  }
   document.addEventListener('click', e=>{
     const t=e.target;
+    const sortTh=t.closest && t.closest('th[data-sort]');
+    if(sortTh && t.closest('table.unmatched')){
+      const col=sortTh.dataset.sort;
+      const currentDir=sortTh.dataset.sortDirection;
+      sortUnmatched(col, currentDir==='asc' ? 'desc' : 'asc');
+      return;
+    }
     if(t.classList.contains('dismiss-row')){
       const tr=t.closest('tr'); const k=rowKey(tr);
       if(dismissed.has(k)) dismissed.delete(k); else dismissed.add(k);
@@ -479,6 +543,10 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       if(confirm('Clear all reviewed marks?')){ dismissed.clear(); save(); applyDismissals(); }
     });
     applyDismissals(); updateCounter();
+    try{
+      const saved=JSON.parse(localStorage.getItem('tagdiff:unmatchedSort')||'null');
+      if(saved && saved.col) sortUnmatched(saved.col, saved.dir||'asc');
+    }catch(_){}
   });
 })();
 """
