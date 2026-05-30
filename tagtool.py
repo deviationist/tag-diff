@@ -277,6 +277,23 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
     tc = data["tc"]
     field_counts = data["field_counts"]
     unmatched_data = data["unmatched"]
+    # Human-readable label + default visibility for each KEY_FIELD. Used by
+    # both the unmatched-section column toggles and the file-filter checkboxes
+    # below. Single source of truth for the labels you see on screen.
+    UMETA = {
+        "title":       ("Title",        True),
+        "artist":      ("Artist",       True),
+        "album":       ("Album",        True),
+        "albumArtist": ("Album artist", True),
+        "genre":       ("Genre",        False),
+        "bpm":         ("BPM",          False),
+        "key":         ("Key",          False),
+        "label":       ("Label",        False),
+        "date":        ("Date",         False),
+        "cover_art":   ("Artwork",      False),
+    }
+    KEY_FIELDS_SET = set(KEY_FIELDS)
+
     # Build the HTML rows from raw changes data.
     files = []
     for f in data["files"]:
@@ -284,6 +301,20 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
         rel_e = _html.escape(rel)
         name_e = _html.escape(os.path.splitext(os.path.basename(rel))[0], quote=True)
         marker_only = f["marker_only"]
+        # Per-file filter classes — which KEY_FIELDS have any change here, and
+        # whether any change is an overwrite (~) or removal (-) of an existing
+        # value. The file-filter controls below toggle these via CSS.
+        kf_changes = set()
+        has_overwrite = False
+        for c in f["changes"]:
+            if c[1] in KEY_FIELDS_SET:
+                kf_changes.add(c[1])
+            if c[0] in ("~", "-"):
+                has_overwrite = True
+        file_classes = [f"change-{k}" for k in sorted(kf_changes)]
+        if has_overwrite:
+            file_classes.append("has-overwrite")
+        cls_str = " ".join(file_classes)
         rows = []
         for c in f["changes"]:
             tag = _html.escape(c[1])
@@ -301,14 +332,14 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
                 f'<td class="action"><button class="dismiss-row" title="Mark row reviewed">✓</button></td>'
                 f'</tr>'
             )
-        files.append((rel_e, name_e, marker_only, rows))
+        files.append((rel_e, name_e, marker_only, rows, cls_str))
 
     fields_rows = "".join(
         f"<tr><td>{_html.escape(k)}</td><td>{v}</td></tr>"
         for k, v in sorted(field_counts.items(), key=lambda x: -x[1]))
 
     file_sections = "".join(
-        f'<details data-file="{rel}"{" data-marker-only=\"1\"" if marker_only else ""} open><summary>'
+        f'<details class="{cls}" data-file="{rel}"{" data-marker-only=\"1\"" if marker_only else ""} open><summary>'
         f'<span class="path">{rel}</span>'
         f'<button class="copy-name" data-copy="{name}" title="Copy filename (no ext)">⧉</button>'
         f'<span class="spacer"></span>'
@@ -317,30 +348,38 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
         f'</summary>'
         f'<table class="diff"><colgroup><col class="col-k"><col><col><col class="col-a"></colgroup>'
         f'<tbody>{"".join(rs)}</tbody></table></details>'
-        for rel, name, marker_only, rs in files)
-    marker_only_count = sum(1 for _, _, mo, _ in files if mo)
+        for rel, name, marker_only, rs, cls in files)
+    marker_only_count = sum(1 for _, _, mo, _, _ in files if mo)
+
+    # File-section filter controls (parallel to the unmatched-section filters).
+    # KEY_FIELDS is the source of truth; checkboxes are 1:1. OR semantics across
+    # selected fields. Plus an "only overwrites" toggle for the small (~218)
+    # subset of files where OneTagger changed or removed an existing value —
+    # the high-scrutiny set when validating that `overwrite: false` didn't bite.
+    file_filter_boxes = "".join(
+        f'<label><input type="checkbox" data-file-filter="{k}"> {_html.escape(UMETA[k][0])}</label>'
+        for k in KEY_FIELDS
+    )
+    file_filters_html = (
+        '<div class="file-filters">'
+        '<div class="ctrl-row">'
+        '<span class="ctrl-label">Show only files with changes to:</span>'
+        f'{file_filter_boxes}'
+        '<button class="ctrl-clear" id="clear-file-filters" title="Clear field filters">clear</button>'
+        '</div>'
+        '<div class="ctrl-row">'
+        '<label><input type="checkbox" id="only-overwrites"> Only files with overwrites '
+        '(<span class="mod-c">~</span> or <span class="del-c">−</span>) — the high-scrutiny subset</label>'
+        '</div>'
+        '</div>'
+    )
 
     # Unmatched section — files OneTagger couldn't tag (no 1T_TAGGEDDATE marker)
     # Each row is a "manual review queue" item; the existing dismiss-row JS marks
     # them as reviewed via localStorage keyed by file::__unmatched__.
     if unmatched_data:
-        # Human-readable label + default visibility for each KEY_FIELD.
-        # KEY_FIELDS is the single source of truth — columns / filters /
-        # visibility checkboxes are all derived from it 1:1.
-        # Default-visible: the original 4 (keep current default view stable).
-        # All other KEY_FIELDS render as columns but hidden by default.
-        UMETA = {
-            "title":       ("Title",        True),
-            "artist":      ("Artist",       True),
-            "album":       ("Album",        True),
-            "albumArtist": ("Album artist", True),
-            "genre":       ("Genre",        False),
-            "bpm":         ("BPM",          False),
-            "key":         ("Key",          False),
-            "label":       ("Label",        False),
-            "date":        ("Date",         False),
-            "cover_art":   ("Artwork",      False),
-        }
+        # UMETA is hoisted to the top of html_report so file-filter controls
+        # and unmatched-section controls share the same label source.
         # cover_art's raw value is verbose (`<image/jpeg, NNNN bytes>`); for
         # the column we just want a yes/blank presence indicator.
         def cell_for(k, raw):
@@ -506,6 +545,18 @@ body.show-marker-only details[data-marker-only="1"]>summary .path::after{
    these two classes. Field-agnostic by construction. */
 table.unmatched tr.filter-hidden{display:none}
 table.unmatched .col-hidden{display:none}
+details[data-file].filter-hidden{display:none}
+/* File-filter controls — mirrors the unmatched-controls styling so the
+   two panels read as siblings. */
+.file-filters{padding:8px 12px;margin:0 0 16px 0;background:#161b22;border:1px solid #30363d;
+  border-radius:6px;display:flex;flex-direction:column;gap:6px}
+.file-filters .ctrl-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px;font-size:12px}
+.file-filters .ctrl-label{color:#8b949e;font-weight:600;min-width:220px}
+.file-filters label{color:#c9d1d9;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:5px}
+.file-filters input[type=checkbox]{accent-color:#79c0ff}
+.file-filters .ctrl-clear{margin-left:auto;background:#21262d;border:1px solid #30363d;
+  color:#c9d1d9;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px}
+.file-filters .ctrl-clear:hover{background:#30363d}
 table.unmatched{width:100%;table-layout:fixed;border-collapse:collapse}
 table.unmatched col.col-num{width:48px}
 table.unmatched col.col-path{width:32%}
@@ -564,7 +615,14 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       if(rs.length && [...rs].every(r=>dismissed.has(rowKey(r)))) doneFiles++;
     });
     const c=document.getElementById('counter');
-    if(c) c.textContent='reviewed: '+doneFiles+'/'+totalFiles+' files · '+doneRows+'/'+totalRows+' changes';
+    if(c){
+      // When a file-filter is active, show '· N visible' so progress in
+      // the filtered subset is legible without losing the total.
+      const visibleFiles=dets.filter(d=>!d.classList.contains('filter-hidden')).length;
+      const filterOn=visibleFiles!==totalFiles;
+      c.textContent='reviewed: '+doneFiles+'/'+totalFiles+' files · '+doneRows+'/'+totalRows+' changes'
+        +(filterOn ? ' · '+visibleFiles+' visible' : '');
+    }
     // Unmatched-section progress — separate so you can see manual-fix backlog independently
     const unmatchedRows=[...document.querySelectorAll('details.unmatched-section tr[data-file]')];
     let doneUnmatched=0; unmatchedRows.forEach(tr=>{ if(dismissed.has(rowKey(tr))) doneUnmatched++; });
@@ -735,6 +793,54 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       });
       applyState();
     }
+    // File-section filters: per-field checkboxes (OR semantics) + an
+    // "only overwrites" toggle. Each <details data-file> carries
+    // change-<field> classes (one per KEY_FIELD it has any change in) and
+    // optionally has-overwrite (any ~ or -). JS computes which files pass
+    // and toggles `filter-hidden`; the CSS rule does the rest.
+    const FFK='tagdiff:fileFilters', OOK='tagdiff:onlyOverwrites';
+    const fileFilters=new Set();
+    try{ JSON.parse(localStorage.getItem(FFK)||'[]').forEach(k=>fileFilters.add(k)); }catch(_){}
+    let onlyOverwrites=false;
+    try{ onlyOverwrites=localStorage.getItem(OOK)==='1'; }catch(_){}
+    const allFileDetails=[...document.querySelectorAll('details[data-file]')];
+    function applyFileFilters(){
+      const active=[...fileFilters];
+      allFileDetails.forEach(d=>{
+        let pass=true;
+        if(active.length>0) pass=active.some(k=>d.classList.contains('change-'+k));
+        if(pass && onlyOverwrites) pass=d.classList.contains('has-overwrite');
+        d.classList.toggle('filter-hidden', !pass);
+      });
+      updateCounter();
+    }
+    document.querySelectorAll('input[data-file-filter]').forEach(cb=>{
+      cb.checked=fileFilters.has(cb.dataset.fileFilter);
+      cb.addEventListener('change', e=>{
+        const k=e.target.dataset.fileFilter;
+        if(e.target.checked) fileFilters.add(k); else fileFilters.delete(k);
+        try{ localStorage.setItem(FFK, JSON.stringify([...fileFilters])); }catch(_){}
+        applyFileFilters();
+      });
+    });
+    const oo=document.getElementById('only-overwrites');
+    if(oo){
+      oo.checked=onlyOverwrites;
+      oo.addEventListener('change', e=>{
+        onlyOverwrites=e.target.checked;
+        try{ localStorage.setItem(OOK, onlyOverwrites?'1':'0'); }catch(_){}
+        applyFileFilters();
+      });
+    }
+    const cff=document.getElementById('clear-file-filters');
+    if(cff) cff.addEventListener('click', ()=>{
+      fileFilters.clear();
+      try{ localStorage.setItem(FFK, '[]'); }catch(_){}
+      document.querySelectorAll('input[data-file-filter]').forEach(cb=>cb.checked=false);
+      applyFileFilters();
+    });
+    applyFileFilters();
+
     // Persist open/closed state of the two top-level <details> sections.
     // HTML defaults are: meta-fields closed, unmatched-section open. Saved
     // state overrides; if no saved state exists, the HTML default is kept.
@@ -783,6 +889,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <div class="small">PRE <code>{_html.escape(pre_root)}</code> → POST <code>{_html.escape(post_root)}</code> · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 </div>
 {unmatched_section}
+{file_filters_html}
 {file_sections}
 </div>
 <script>{js}</script>
