@@ -523,6 +523,11 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
             for k in KEY_FIELDS
         )
 
+        # Inline script that runs the moment the parser hits it — restores
+        # open/closed state from localStorage immediately after the element
+        # exists, instead of waiting for the rest of the 22 MB HTML to parse
+        # and DOMContentLoaded to fire. The toggle listener is also wired
+        # here so the section is self-contained.
         unmatched_section = (
             # Closed by default so the layout doesn't shift downward when
             # the persistence JS applies a saved closed-state — opening
@@ -542,6 +547,13 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
             f'{ths}'
             f'<th data-col="present">Currently has</th><th data-col="action"></th></tr></thead>'
             f'<tbody>{"".join(u_rows)}</tbody></table></details>'
+            # Inline state-restore + toggle listener — runs as soon as the
+            # parser reaches this script, no DOMContentLoaded wait.
+            '<script>(function(){var d=document.currentScript.previousElementSibling;'
+            "if(!d||d.tagName!=='DETAILS')return;var k='tagdiff:openUnmatched';"
+            "try{var s=localStorage.getItem(k);if(s==='1')d.open=true;else if(s==='0')d.open=false;}catch(_){};"
+            "d.addEventListener('toggle',function(){try{localStorage.setItem(k,d.open?'1':'0');}catch(_){}});"
+            '})();</script>'
         )
     else:
         unmatched_section = ""
@@ -1034,24 +1046,11 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       else if(e.key==='ArrowRight'){ lbStep(1); e.preventDefault(); }
     });
 
-    // Persist open/closed state of the two top-level <details> sections.
-    // HTML defaults are: meta-fields closed, unmatched-section open. Saved
-    // state overrides; if no saved state exists, the HTML default is kept.
-    const SECTIONS=[
-      {sel:'details.meta-fields',       key:'tagdiff:openChangesByField'},
-      {sel:'details.unmatched-section', key:'tagdiff:openUnmatched'},
-    ];
-    SECTIONS.forEach(({sel,key})=>{
-      const d=document.querySelector(sel);
-      if(!d) return;
-      let saved=null;
-      try{ saved=localStorage.getItem(key); }catch(_){}
-      if(saved==='1') d.open=true;
-      else if(saved==='0') d.open=false;
-      d.addEventListener('toggle',()=>{
-        try{ localStorage.setItem(key, d.open?'1':'0'); }catch(_){}
-      });
-    });
+    // Open/closed state of meta-fields + unmatched-section is restored
+    // earlier via inline scripts emitted right after each section — see
+    // their template literals. Doing it here would wait for DOMContentLoaded,
+    // which on a 22 MB report fires several seconds after the section is
+    // already on screen.
     applyDismissals(); updateCounter();
     try{
       const saved=JSON.parse(localStorage.getItem('tagdiff:unmatchedSort')||'null');
@@ -1080,6 +1079,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
   <summary><span class="sub">Changes by field</span></summary>
   <table class="mini"><tbody>{fields_rows}</tbody></table>
 </details>
+<script>(function(){{var d=document.currentScript.previousElementSibling;if(!d||d.tagName!=='DETAILS')return;var k='tagdiff:openChangesByField';try{{var s=localStorage.getItem(k);if(s==='1')d.open=true;else if(s==='0')d.open=false;}}catch(_){{}};d.addEventListener('toggle',function(){{try{{localStorage.setItem(k,d.open?'1':'0');}}catch(_){{}}}});}})();</script>
 <div class="small">PRE <code>{_html.escape(pre_root)}</code> → POST <code>{_html.escape(post_root)}</code> · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 </div>
 {unmatched_section}
