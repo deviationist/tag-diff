@@ -735,6 +735,24 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
       });
       applyState();
     }
+    // Persist open/closed state of the two top-level <details> sections.
+    // HTML defaults are: meta-fields closed, unmatched-section open. Saved
+    // state overrides; if no saved state exists, the HTML default is kept.
+    const SECTIONS=[
+      {sel:'details.meta-fields',       key:'tagdiff:openChangesByField'},
+      {sel:'details.unmatched-section', key:'tagdiff:openUnmatched'},
+    ];
+    SECTIONS.forEach(({sel,key})=>{
+      const d=document.querySelector(sel);
+      if(!d) return;
+      let saved=null;
+      try{ saved=localStorage.getItem(key); }catch(_){}
+      if(saved==='1') d.open=true;
+      else if(saved==='0') d.open=false;
+      d.addEventListener('toggle',()=>{
+        try{ localStorage.setItem(key, d.open?'1':'0'); }catch(_){}
+      });
+    });
     applyDismissals(); updateCounter();
     try{
       const saved=JSON.parse(localStorage.getItem('tagdiff:unmatchedSort')||'null');
