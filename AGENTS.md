@@ -25,11 +25,13 @@ already-running container in batches; it doesn't share state with `tagtool.py`.
 
 ```python
 {
-  "version": 1,
-  "generated": "ISO-8601 timestamp",
-  "pre_root": "/path",
-  "post_root": "/path",
-  "n_total":   <int — files walked>,
+  "version":    1,
+  "generated":  "ISO-8601 timestamp",
+  "pre_root":   "/path",
+  "post_root":  "/path",
+  "n_total":    <int — files walked>,
+  "n_ignored":  <int — rels skipped by --ignore patterns>,
+  "ignores":    [<glob>, ...],   # active patterns at extract time
   "files": [
     {
       "rel": "rel/path.aiff",
@@ -38,7 +40,11 @@ already-running container in batches; it doesn't share state with `tagtool.py`.
         ["+", "<tag>", "<new>"],
         ["-", "<tag>", "<old>"],
         ["~", "<tag>", "<old>", "<new>"],
-      ]
+      ],
+      "art_thumbs": {                  # OPTIONAL — only when cover_art changes
+        "after":  "data:image/jpeg;base64,...",  # post-side thumbnail (+ and ~ ops)
+        "before": "data:image/jpeg;base64,...",  # pre-side thumbnail (- and ~ ops)
+      }
     }, ...
   ],
   "unmatched": [
@@ -51,7 +57,9 @@ already-running container in batches; it doesn't share state with `tagtool.py`.
 
 This is the JSON written by `extract`. `render` reads it and builds HTML.
 **Do not break this schema** without bumping `version` — cached `data.json`
-files (gitignored) will be reused across renders.
+files (gitignored) will be reused across renders. Adding optional fields
+(like `art_thumbs`) is backward-compatible; old cached data still renders
+fine, the new feature just stays empty.
 
 ## Iteration loop (this is the point of the split)
 
@@ -59,9 +67,13 @@ When iterating on the HTML/CSS/JS, **do not re-extract.** That walks 3,800+
 files with mutagen and takes ~30 seconds. Instead:
 
 ```bash
-python tagtool.py extract /tank/music /tank/music-ot data.json < file-list.txt   # ~30s, once
+python tagtool.py extract /tank/music /tank/music-ot data.json < file-list.txt   # ~30-60s, once
 python tagtool.py render  data.json report.html                                   # ~0.1s, every change
 ```
+
+Extract time depends on cover-art volume: on a 3,800-file library with
+~1,000 cover-art changes, Pillow thumbnail extraction adds ~15s. Files
+without cover-art changes pay only the mutagen read.
 
 Most edits to `tagtool.py` only touch the rendering — tweak, re-render in
 ~100ms, reload the HTML, repeat. Only re-run `extract` when the on-disk tags
@@ -85,11 +97,18 @@ modified `extract_data` itself.
 - **Don't pre-render HTML inside `extract_data`.** The data step must produce
   JSON-serialisable plain values (lists, dicts, strings, ints, bools).
   Pre-rendered HTML belongs in `render_html` only.
-- **All UI persistence** (mark-as-reviewed state, `show marker-only` toggle,
-  `show reviewed` toggle) is in browser `localStorage` keyed by
-  `tagdiff:dismissed` / `tagdiff:showDismissed` / `tagdiff:showMarkerOnly`.
-  Dismissals are keyed by `<rel-path>::<tag-name>` so they survive report
-  re-generation as long as the same `(file, tag)` pairs appear.
+- **All UI persistence** is in browser `localStorage`. Keys:
+  - `tagdiff:dismissed` — set of `<rel-path>::<tag-name>` (✓ marks). Survives report regeneration as long as the same `(file, tag)` pairs reappear.
+  - `tagdiff:showDismissed` / `tagdiff:showMarkerOnly` / `tagdiff:showArtwork` — header toggles.
+  - `tagdiff:fileFilters` — selected field set for the diff-section filter (JSON array). OR semantics across selected fields.
+  - `tagdiff:onlyOverwrites` — `'0'`/`'1'` for the "only files with `~` or `−`" toggle.
+  - `tagdiff:unmatchedFilters` — selected missing-field set for the unmatched table (JSON array).
+  - `tagdiff:unmatchedHiddenCols` — hidden columns in the unmatched table (JSON array).
+  - `tagdiff:unmatchedSort` — `{col, dir}` for the unmatched table's sort.
+  - `tagdiff:openChangesByField` / `tagdiff:openUnmatched` — `'0'`/`'1'` open-state for the two top-level `<details>` sections.
+- **Section open-state is restored via inline `<script>` blocks, not `DOMContentLoaded`.** On a 22 MB report, `DOMContentLoaded` fires several seconds after the section is already painted, producing a visible "open → collapse" flicker if the user had it closed last time. The inline scripts use `document.currentScript.previousElementSibling` to grab the just-parsed `<details>`, read `localStorage`, set `d.open`, and attach a `toggle` listener — all synchronously before the parser moves to the next element. **Keep this pattern** if you add any other top-level sections that warrant persistence.
+- **Artwork thumbnails are lazy-hydrated.** Embedded as `<img class="art" data-art="data:image/jpeg;base64,…">` with no `src` attribute. Only when the user toggles `show artwork` on does JS swap `data-art` into `src` (once — re-toggling off just CSS-hides). This keeps cold load times reasonable on a 22 MB report with ~1,000 base64 images. **Don't move artwork hydration into eager-load** unless you've measured the cost on a comparable report.
+- **Lightbox navigation** walks `[...document.querySelectorAll('img.art')].filter(i => i.offsetParent !== null)` — relies on `offsetParent === null` for any `display:none` ancestor (collapsed `<details>`, filter-hidden, marker-only-hidden). If you add new visibility gates, make sure they collapse correctly so the lightbox arrows skip them automatically.
 
 ## What lives where
 
@@ -99,7 +118,7 @@ modified `extract_data` itself.
 | `run-bulk.sh` | Bash driver for `onetagger-cli` in batches; unrelated to tagtool.py. |
 | `examples/docker-compose.yml` | Generic OneTagger container stack (Tier-0 hardened). User adapts paths. |
 | `examples/auto-tag.example.json` | The autotagger profile that worked for us; **secrets blanked**. |
-| `requirements.txt` | Just `mutagen`. |
+| `requirements.txt` | `mutagen` (tag reading) + `Pillow` (thumbnail resize). Pillow is optional at runtime — `extract_art_thumb` catches ImportError and just returns `None`. |
 | `assets/screenshot.jpg` | README hero image. |
 | `data.json` | (gitignored) The `extract`'s JSON cache — library-specific. |
 | `report*.html` | (gitignored) Generated outputs. |

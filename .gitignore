@@ -12,3 +12,4 @@ report*.html
 .vscode/
 .idea/
 *.swp
+art-downscale-*.txt

@@ -46,11 +46,13 @@ your own.
 
 GitHub-style review UI in one self-contained file:
 
-- **Sticky top toolbar** — overall stats (`X scanned · Y changed · (M marker-only) · K unmatched · +A ~M −R changes`), `show marker-only` toggle, `show reviewed` toggle, live `reviewed: X/Y files · A/B changes` counter, live `visible · doc-height-px` page-meter, `clear` button.
+- **Sticky top toolbar** — overall stats (`X scanned · Y changed · (M marker-only) · K unmatched · +A ~M −R changes`), `show marker-only` / `show reviewed` / `show artwork` toggles, live `reviewed: X/Y files · A/B changes` counter (gains `· N visible` when a filter is active), live `visible · doc-height-px` page-meter, `clear` button.
 - **Fixed-position columns** (tag · before · after · ✓) so info stays in the same place as you scroll across files.
 - **Per-row ✓** and **per-file ✓** mark-as-reviewed buttons; persisted in browser `localStorage` keyed by `file::tag` (survives page reload; regenerated reports keep the marks for the same rows).
 - **Unmatched section** at the top (amber) — manual-review queue listing every file OneTagger couldn't match, with path · title · artist · album-artist · album · what tags it currently has · ✓. Its own collapsible header carries an `X/Y confirmed` progress counter. Open in Meta (Mac) / Rekordbox / any tag editor to fix them manually. Two control rows above the table: **missing-field filters** (show rows lacking values in *any* of the selected columns — OR semantics; tick album-artist + album to see rows missing either) and **column visibility toggles** (hide columns you don't care about). Both persist in `localStorage`; counter shows `… · N visible` when a filter is active.
+- **File-section filters** — the main git-diff list has a parallel control panel: **field filters** (tick `Album` + `Album artist` to surface only files where OneTagger touched either, OR semantics) and an **"only files with overwrites (`~` or `−`)"** toggle for the small subset where OT replaced or removed an existing value (the high-scrutiny set when validating `overwrite: false`). State persists in `localStorage`; counter shows `… · N visible` when active.
 - **Marker-only filter** — files whose only diff is OneTagger's `TXXX:1T_TAGGEDDATE` stamp (i.e. OneTagger matched but the file was already fully tagged, so nothing was actually written with `overwrite:false`) are hidden by default as review noise; `show marker-only` brings them back greyed-out.
+- **Optional artwork preview** — `show artwork` reveals 48px thumbnails next to every `cover_art` change. Click → lightbox at native 256px with **`‹` / `›` buttons and `←` / `→` keyboard** to step through every visible cover in document order. Off by default — when on, only then do the ~1,000 base64 thumbnails get hydrated, so the cold report stays fast.
 - **⧉ copy buttons** next to every filename — copies the basename without extension to clipboard. Useful for googling tracks while validating tag changes.
 - **Filename gets a timestamp inserted automatically**: `report.html` → `report-YYYY-MM-DD-HHMM.html`, plus a stable `report.html` copy refreshed to the latest.
 
@@ -104,5 +106,5 @@ bash run-bulk.sh                     # the real run
 
 ## Requirements
 
-- Python 3.10+ with `mutagen` (`requirements.txt`).
+- Python 3.10+ with `mutagen` and `Pillow` (`requirements.txt`). Pillow is used to extract+resize embedded cover art into the report; if absent, the artwork toggle just stays empty (no other features break).
 - For `run-bulk.sh`: Docker, a running OneTagger container with the music tree bind-mounted, a tuned `auto-tag.json` profile.
