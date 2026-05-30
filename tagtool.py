@@ -524,7 +524,10 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
         )
 
         unmatched_section = (
-            '<details class="unmatched-section" open>'
+            # Closed by default so the layout doesn't shift downward when
+            # the persistence JS applies a saved closed-state — opening
+            # (additive) is less jarring than collapsing (subtractive).
+            '<details class="unmatched-section">'
             f'<summary><span class="path">Unmatched — needs manual review</span>'
             f'<span class="spacer"></span>'
             f'<span class="count" id="unmatched-counter">0/{len(unmatched_data)} confirmed</span></summary>'
