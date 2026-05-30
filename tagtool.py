@@ -195,6 +195,51 @@ KEY_FIELDS = ("title", "artist", "album", "albumArtist", "genre",
               "bpm", "key", "label", "date", "cover_art")
 
 
+def extract_art_thumb(path, max_size=256, quality=70):
+    """Return a 'data:image/jpeg;base64,...' URI for the file's embedded cover
+    art, resized to max_size and JPEG-encoded. None on any failure (missing
+    file, no embedded art, decode error, etc.) — caller falls back to plain
+    text. Used by extract_data to populate per-file thumbnails for the
+    artwork-toggle in the HTML report.
+    """
+    try:
+        from io import BytesIO
+        import base64
+        from mutagen import File as MFile
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        f = MFile(path)
+        if not f or not f.tags:
+            return None
+        data = None
+        # ID3 APIC frames (MP3, AIFF, WAV)
+        for k, v in f.tags.items():
+            if k.startswith("APIC") and hasattr(v, "data"):
+                data = v.data
+                break
+        # MP4 'covr' atoms (M4A)
+        if data is None and "covr" in f.tags:
+            cov = f.tags["covr"]
+            if cov:
+                data = bytes(cov[0])
+        # FLAC pictures
+        if data is None and hasattr(f, "pictures") and f.pictures:
+            data = f.pictures[0].data
+        if not data:
+            return None
+        img = Image.open(BytesIO(data))
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
 def extract_data(pre_root, post_root, rels, ignores=None):
     """Walk PRE and POST trees, read tags, compute diffs. Return a JSON-able
     data dict — consumed by html_report / render_html.
@@ -240,11 +285,28 @@ def extract_data(pre_root, post_root, rels, ignores=None):
                 tc["changed"] += 1
         marker_only = (len(changes) == 1 and changes[0][0] == "+"
                        and changes[0][1] == "TXXX:1T_TAGGEDDATE")
-        files.append({
+        # If this file has any cover_art change, extract POST-side thumbnail
+        # (and PRE-side too on ~ ops, so the lightbox can show before/after).
+        # Failures (missing/corrupt embedded art) silently fall through to None
+        # — caller still shows the verbose text fallback.
+        art_thumbs = None
+        for c in changes:
+            if c[1] != "cover_art":
+                continue
+            art_thumbs = {}
+            if c[0] in ("+", "~"):
+                art_thumbs["after"] = extract_art_thumb(os.path.join(post_root, rel))
+            if c[0] in ("-", "~"):
+                art_thumbs["before"] = extract_art_thumb(os.path.join(pre_root, rel))
+            break
+        entry = {
             "rel": rel,
             "marker_only": marker_only,
             "changes": [list(c) for c in changes],
-        })
+        }
+        if art_thumbs:
+            entry["art_thumbs"] = art_thumbs
+        files.append(entry)
     return {
         "version": 1,
         "generated": datetime.now().isoformat(timespec="seconds"),
@@ -315,6 +377,16 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
         if has_overwrite:
             file_classes.append("has-overwrite")
         cls_str = " ".join(file_classes)
+        art_thumbs = f.get("art_thumbs") or {}
+
+        def _art_img(side):
+            uri = art_thumbs.get(side)
+            if not uri:
+                return ""
+            # `data-art` carries the data URI; JS swaps it into `src` only when
+            # the "show artwork" toggle is on, so cold load doesn't pay the
+            # decode cost for ~1000 base64 images.
+            return f'<img class="art" alt="{side} artwork" data-art="{_html.escape(uri, quote=True)}">'
         rows = []
         for c in f["changes"]:
             tag = _html.escape(c[1])
@@ -324,6 +396,11 @@ def html_report(pre_root, post_root, rels, out_path, data=None, ignores=None):
                 before, after, cls = _html.escape(str(c[2])), "", "del"
             else:
                 before, after, cls = _html.escape(str(c[2])), _html.escape(str(c[3])), "mod"
+            if c[1] == "cover_art":
+                if c[0] in ("+", "~"):
+                    after = after + _art_img("after")
+                if c[0] in ("-", "~"):
+                    before = before + _art_img("before")
             rows.append(
                 f'<tr class="{cls}" data-file="{rel_e}" data-tag="{tag}">'
                 f'<td class="k">{tag}</td>'
@@ -546,6 +623,19 @@ body.show-marker-only details[data-marker-only="1"]>summary .path::after{
 table.unmatched tr.filter-hidden{display:none}
 table.unmatched .col-hidden{display:none}
 details[data-file].filter-hidden{display:none}
+/* Artwork thumbnails — gated by body.show-artwork. JS lazy-swaps `data-art`
+   into `src` only when the toggle is on, so the cold report doesn't decode
+   ~1000 base64 images. */
+img.art{display:none}
+body.show-artwork img.art{display:inline-block;width:48px;height:48px;object-fit:cover;
+  margin-left:6px;border:1px solid #30363d;border-radius:3px;cursor:zoom-in;vertical-align:middle}
+body.show-artwork img.art:hover{border-color:#79c0ff}
+/* Lightbox: fixed overlay holding the 256x256 native image. Click anywhere
+   outside the image (or press Esc) to dismiss. */
+#art-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;
+  display:none;align-items:center;justify-content:center;cursor:zoom-out}
+#art-lightbox.open{display:flex}
+#art-lightbox img{max-width:90vw;max-height:90vh;border:1px solid #30363d;border-radius:4px}
 /* File-filter controls — mirrors the unmatched-controls styling so the
    two panels read as siblings. */
 .file-filters{padding:8px 12px;margin:0 0 16px 0;background:#161b22;border:1px solid #30363d;
@@ -841,6 +931,49 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
     });
     applyFileFilters();
 
+    // Artwork toggle — lazy-load thumbnails only when enabled. data-art holds
+    // the data URI; only when the user opts in do we set src and trigger
+    // decoding. State persists via tagdiff:showArtwork.
+    const SA_KEY='tagdiff:showArtwork';
+    const sa=document.getElementById('show-artwork');
+    function applyArtwork(on){
+      document.body.classList.toggle('show-artwork', on);
+      if(on){
+        // Lazy hydration: set src from data-art once. Re-toggling off doesn't
+        // unset it — the image stays decoded, just CSS-hidden.
+        document.querySelectorAll('img.art[data-art]').forEach(img=>{
+          if(!img.src) img.src=img.dataset.art;
+        });
+      }
+    }
+    if(sa){
+      const persisted=localStorage.getItem(SA_KEY)==='1';
+      sa.checked=persisted;
+      applyArtwork(persisted);
+      sa.addEventListener('change', e=>{
+        try{ localStorage.setItem(SA_KEY, e.target.checked?'1':'0'); }catch(_){}
+        applyArtwork(e.target.checked);
+      });
+    }
+    // Lightbox: click a thumbnail to open at native 256px, click overlay or
+    // press Esc to close.
+    const lb=document.getElementById('art-lightbox');
+    const lbImg=lb && lb.querySelector('img');
+    document.addEventListener('click', e=>{
+      const t=e.target;
+      if(t && t.classList && t.classList.contains('art')){
+        if(lb && lbImg){ lbImg.src=t.src||t.dataset.art||''; lb.classList.add('open'); }
+        e.preventDefault(); e.stopPropagation();
+      } else if(lb && t===lb){
+        lb.classList.remove('open'); lbImg.src='';
+      }
+    });
+    document.addEventListener('keydown', e=>{
+      if(e.key==='Escape' && lb && lb.classList.contains('open')){
+        lb.classList.remove('open'); lbImg.src='';
+      }
+    });
+
     // Persist open/closed state of the two top-level <details> sections.
     // HTML defaults are: meta-fields closed, unmatched-section open. Saved
     // state overrides; if no saved state exists, the HTML default is kept.
@@ -876,6 +1009,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 <span class="spacer"></span>
 <label><input type="checkbox" id="show-marker-only"> show marker-only</label>
 <label><input type="checkbox" id="show-dismissed"> show reviewed</label>
+<label><input type="checkbox" id="show-artwork"> show artwork</label>
 <span id="counter">reviewed: 0/0 files · 0/0 changes</span>
 <span id="page-meter" class="sub" title="visible detail sections / document scrollable height — watch this jump when you flip the filters">— · — px</span>
 <button id="clear-all" title="Clear all reviewed marks">clear</button>
@@ -892,6 +1026,7 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 {file_filters_html}
 {file_sections}
 </div>
+<div id="art-lightbox" role="dialog" aria-label="Artwork preview"><img alt=""></div>
 <script>{js}</script>
 </body></html>"""
     with open(out_path, "w") as f:
