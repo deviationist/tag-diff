@@ -631,11 +631,25 @@ body.show-artwork img.art{display:inline-block;width:48px;height:48px;object-fit
   margin-left:6px;border:1px solid #30363d;border-radius:3px;cursor:zoom-in;vertical-align:middle}
 body.show-artwork img.art:hover{border-color:#79c0ff}
 /* Lightbox: fixed overlay holding the 256x256 native image. Click anywhere
-   outside the image (or press Esc) to dismiss. */
+   outside the image (or press Esc) to dismiss. Arrow buttons + keyboard
+   ←/→ step through every currently-visible img.art in document order. */
 #art-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;
   display:none;align-items:center;justify-content:center;cursor:zoom-out}
 #art-lightbox.open{display:flex}
-#art-lightbox img{max-width:90vw;max-height:90vh;border:1px solid #30363d;border-radius:4px}
+#art-lightbox img{max-width:90vw;max-height:80vh;border:1px solid #30363d;border-radius:4px}
+#art-lightbox .lb-nav{position:fixed;top:50%;transform:translateY(-50%);
+  background:rgba(33,38,45,.85);border:1px solid #30363d;color:#c9d1d9;
+  width:48px;height:80px;font-size:36px;line-height:1;cursor:pointer;
+  border-radius:6px;display:flex;align-items:center;justify-content:center;
+  user-select:none}
+#art-lightbox .lb-nav:hover{background:#30363d;color:#79c0ff}
+#art-lightbox .lb-nav:disabled{opacity:.3;cursor:not-allowed}
+#art-lightbox .lb-prev{left:24px}
+#art-lightbox .lb-next{right:24px}
+#art-lightbox .lb-caption{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:rgba(13,17,23,.85);color:#c9d1d9;padding:6px 12px;border-radius:4px;
+  font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;max-width:80vw;
+  text-overflow:ellipsis;overflow:hidden;white-space:nowrap;cursor:default}
 /* File-filter controls — mirrors the unmatched-controls styling so the
    two panels read as siblings. */
 .file-filters{padding:8px 12px;margin:0 0 16px 0;background:#161b22;border:1px solid #30363d;
@@ -955,23 +969,66 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
         applyArtwork(e.target.checked);
       });
     }
-    // Lightbox: click a thumbnail to open at native 256px, click overlay or
-    // press Esc to close.
+    // Lightbox: click a thumbnail to open at native 256px, ← / → to navigate
+    // through every visible img.art in document order, Esc or overlay-click
+    // to close. "Visible" means the element renders (offsetParent != null),
+    // which covers: parent <details> open, no filter-hidden ancestor, and
+    // marker-only not suppressed. Wraps at both ends.
     const lb=document.getElementById('art-lightbox');
     const lbImg=lb && lb.querySelector('img');
+    const lbPrev=lb && lb.querySelector('.lb-prev');
+    const lbNext=lb && lb.querySelector('.lb-next');
+    const lbCap=lb && lb.querySelector('.lb-caption');
+    let lbCurrent=null;
+    function visibleArt(){
+      return [...document.querySelectorAll('img.art')].filter(i=>i.offsetParent!==null);
+    }
+    function lbOpen(img){
+      lbCurrent=img;
+      // Ensure src is set (lazy hydration may have skipped this image if
+      // toggle was off when the page loaded).
+      if(!img.src && img.dataset.art) img.src=img.dataset.art;
+      lbImg.src=img.src||img.dataset.art||'';
+      // Caption: parent file path (data-file on the surrounding <details>)
+      // + side hint (before / after) from the alt attribute.
+      const det=img.closest('details[data-file]');
+      const side=img.alt||'';
+      const path=det ? det.dataset.file : '';
+      lbCap.textContent = (side ? side+' — ' : '') + path;
+      lb.classList.add('open');
+    }
+    function lbClose(){
+      lb.classList.remove('open'); lbImg.src=''; lbCap.textContent=''; lbCurrent=null;
+    }
+    function lbStep(dir){
+      const vis=visibleArt();
+      if(!vis.length) return;
+      let idx=lbCurrent ? vis.indexOf(lbCurrent) : -1;
+      if(idx<0){ idx=dir>0 ? -1 : vis.length; }
+      const next=vis[(idx+dir+vis.length)%vis.length];
+      if(next) lbOpen(next);
+    }
     document.addEventListener('click', e=>{
       const t=e.target;
       if(t && t.classList && t.classList.contains('art')){
-        if(lb && lbImg){ lbImg.src=t.src||t.dataset.art||''; lb.classList.add('open'); }
+        lbOpen(t);
         e.preventDefault(); e.stopPropagation();
-      } else if(lb && t===lb){
-        lb.classList.remove('open'); lbImg.src='';
+      } else if(t===lbPrev){
+        lbStep(-1); e.preventDefault(); e.stopPropagation();
+      } else if(t===lbNext){
+        lbStep(1); e.preventDefault(); e.stopPropagation();
+      } else if(t===lbImg || t===lbCap){
+        // Click on the image or caption — do nothing, let user keep navigating.
+        e.preventDefault(); e.stopPropagation();
+      } else if(lb && lb.classList.contains('open') && t===lb){
+        lbClose();
       }
     });
     document.addEventListener('keydown', e=>{
-      if(e.key==='Escape' && lb && lb.classList.contains('open')){
-        lb.classList.remove('open'); lbImg.src='';
-      }
+      if(!lb || !lb.classList.contains('open')) return;
+      if(e.key==='Escape'){ lbClose(); e.preventDefault(); }
+      else if(e.key==='ArrowLeft'){ lbStep(-1); e.preventDefault(); }
+      else if(e.key==='ArrowRight'){ lbStep(1); e.preventDefault(); }
     });
 
     // Persist open/closed state of the two top-level <details> sections.
@@ -1026,7 +1083,12 @@ table.unmatched td.present{color:#8b949e;font-size:12px}
 {file_filters_html}
 {file_sections}
 </div>
-<div id="art-lightbox" role="dialog" aria-label="Artwork preview"><img alt=""></div>
+<div id="art-lightbox" role="dialog" aria-label="Artwork preview">
+  <button class="lb-nav lb-prev" type="button" aria-label="Previous artwork">‹</button>
+  <img alt="">
+  <button class="lb-nav lb-next" type="button" aria-label="Next artwork">›</button>
+  <div class="lb-caption"></div>
+</div>
 <script>{js}</script>
 </body></html>"""
     with open(out_path, "w") as f:
